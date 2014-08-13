@@ -1,0 +1,9 @@
+*
+!.gitignore
+!.travis.yml
+!Cargo.toml
+!*.cmake
+!*.md
+!*.txt
+!*.rs
+!src/
