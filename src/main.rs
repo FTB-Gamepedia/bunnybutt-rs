@@ -1,6 +1,13 @@
+#![feature(phase)]
+#[phase(plugin)]
+extern crate regex_macros;
+extern crate regex;
 
 use std::io::net::tcp::TcpStream;
-use std::io::{BufferedReader, BufferedWriter, IoResult};
+use std::io::timer::sleep;
+use std::io::{BufferedReader, BufReader, BufferedWriter, EndOfFile, IoError, IoResult};
+use std::iter::Repeat;
+use std::result::collect;
 
 struct Bot {
     cout: BufferedWriter<TcpStream>,
@@ -26,8 +33,26 @@ impl Bot {
     fn run(&mut self) -> IoResult<()> {
         try!(self.send_nick());
         try!(self.send_user());
-        for line in self.cin.lines() {
-            println!("IN: {}", line);
+        let reg_source = regex!(r"^:(\S)");
+        loop {
+            let line: IoResult<Vec<u8>> = collect(self.cin.bytes()
+                .chain(Repeat::<IoResult<u8>>::new(Err(IoError {
+                    kind: EndOfFile,
+                    desc: "Connection terminated",
+                    detail: None,
+                })))
+                .take_while(|c| {
+                    match c {
+                        &Ok(b'\r') => false,
+                        &Ok(b'\n') => false,
+                        _ => true,
+                    }
+                }));
+            let line = try!(line);
+            if line.is_empty() { continue }
+            let line = String::from_utf8_lossy(line.as_slice());
+            let line = line.as_slice();
+            println!("{}", line);
         }
         Ok(())
     }
@@ -64,5 +89,6 @@ fn main() {
             Ok(_) => println!("Bot ended ok?"),
             Err(e) => println!("Bot failed: {}", e),
         }
+        sleep(5000);
     }
 }
