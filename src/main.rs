@@ -5,9 +5,7 @@ extern crate regex;
 
 use std::io::net::tcp::TcpStream;
 use std::io::timer::sleep;
-use std::io::{BufferedReader, BufReader, BufferedWriter, EndOfFile, IoError, IoResult};
-use std::iter::Repeat;
-use std::result::collect;
+use std::io::{BufferedReader, BufferedWriter, EndOfFile, IoResult};
 
 struct Bot {
     cout: BufferedWriter<TcpStream>,
@@ -30,31 +28,70 @@ impl Bot {
             cin: BufferedReader::new(tcp),
         }
     }
+    // Borrowed from std::io::Buffer::read_until
+    fn read_line(&mut self) -> IoResult<Vec<u8>> {
+        let mut res = Vec::new();
+        let mut used;
+        loop {
+            {
+                let available = match self.cin.fill_buf() {
+                    Ok(n) => n,
+                    Err(ref e) if res.len() > 0 && e.kind == EndOfFile => {
+                        used = 0;
+                        break
+                    }
+                    Err(e) => return Err(e)
+                };
+                match available.iter().position(|&b| b == b'\n' || b == b'\r') {
+                    Some(i) => {
+                        res.push_all(available.slice_to(i));
+                        used = i + 1;
+                        break
+                    }
+                    None => {
+                        res.push_all(available);
+                        used = available.len();
+                    }
+                }
+            }
+            self.cin.consume(used);
+        }
+        self.cin.consume(used);
+        Ok(res)
+    }
+    fn parse_line(line: &str) -> (Option<&str>, Vec<&str>, Option<&str>) {
+        let reg_source = regex!(r"^:([^ ]+)");
+        let reg_msg = regex!(r" :(.*)$");
+        let reg_param = regex!(r"([^ ]+)");
+        let cap_source = reg_source.captures(line);
+        let cap_source = cap_source.as_ref();
+        let source = cap_source.map(|cap| cap.at(1));
+        let cap_msg = reg_msg.captures(line);
+        let cap_msg = cap_msg.as_ref();
+        let msg = cap_msg.map(|cap| cap.at(1));
+        let begin = cap_source.and_then(|cap| cap.pos(0)
+            .map(|pos| pos.val1())).unwrap_or(0);
+        let end = cap_msg.and_then(|cap| cap.pos(0)
+            .map(|pos| pos.val0())).unwrap_or(line.len());
+        let params = reg_param.captures_iter(line.slice(begin, end))
+            .map(|cap| cap.at(1)).collect::<Vec<&str>>();
+        (source, params, msg)
+    }
     fn run(&mut self) -> IoResult<()> {
         try!(self.send_nick());
         try!(self.send_user());
-        let reg_source = regex!(r"^:(\S)");
         loop {
-            let line: IoResult<Vec<u8>> = collect(self.cin.bytes()
-                .chain(Repeat::<IoResult<u8>>::new(Err(IoError {
-                    kind: EndOfFile,
-                    desc: "Connection terminated",
-                    detail: None,
-                })))
-                .take_while(|c| {
-                    match c {
-                        &Ok(b'\r') => false,
-                        &Ok(b'\n') => false,
-                        _ => true,
-                    }
-                }));
-            let line = try!(line);
-            if line.is_empty() { continue }
+            let line = try!(self.read_line());
             let line = String::from_utf8_lossy(line.as_slice());
-            let line = line.as_slice();
-            println!("{}", line);
+            let (source, params, msg) = Bot::parse_line(line.as_slice());
+            let params = params.as_slice();
+            let command = match params.get(0) {
+                Some(command) => command,
+                None => continue,
+            };
+            let params = params.slice_from(1);
+            println!("{}, {}, {}, {}", source, command, params, msg);
         }
-        Ok(())
     }
     fn send(
         &mut self, source: Option<&str>, command: &str, args: &[&str], message: Option<&str>
