@@ -2,12 +2,18 @@
 #[phase(plugin)]
 extern crate regex_macros;
 extern crate regex;
+extern crate term;
 
 use std::io::net::tcp::TcpStream;
+use std::io::stdio::flush;
 use std::io::timer::sleep;
 use std::io::{BufferedReader, BufferedWriter, EndOfFile, IoResult};
+use std::time::Duration;
+use term::{Terminal, WriterWrapper};
+use term::stdout;
 
 struct Bot {
+term: Box<Terminal<WriterWrapper> + Send>,
     cout: BufferedWriter<TcpStream>,
     cin: BufferedReader<TcpStream>,
 }
@@ -24,6 +30,7 @@ impl Bot {
         let tcp = Bot::connect();
         println!("Connected!");
         Bot {
+            term: stdout().unwrap(),
             cout: BufferedWriter::new(tcp.clone()),
             cin: BufferedReader::new(tcp),
         }
@@ -77,8 +84,14 @@ impl Bot {
             .map(|cap| cap.at(1)).collect::<Vec<&str>>();
         (source, params, msg)
     }
+    fn shorten(name: &str) -> &str {
+        match name.find('!') {
+            Some(pos) => name.slice_to(pos),
+            None => name,
+        }
+    }
     fn run(&mut self) -> IoResult<()> {
-        try!(self.send_nick());
+        try!(self.send_nick("FTButt"));
         try!(self.send_user());
         loop {
             let line = try!(self.read_line());
@@ -90,32 +103,77 @@ impl Bot {
                 None => continue,
             };
             let params = params.slice_from(1);
-            println!("{}, {}, {}, {}", source, command, params, msg);
+            match command {
+                &"372" => {
+                    try!(self.term.fg(5));
+                    println!("{}", msg.unwrap_or(""));
+                }
+                &"375" => (),
+                &"376" => try!(self.send_join("#FTB-Wiki")),
+                &"433" => try!(self.send_nick("FTButtocks")),
+                &"NOTICE" => {
+                    match params.get(0) {
+                        Some(&"*") => {
+                            try!(self.term.fg(1));
+                            print!("NOTICE: ");
+                            flush();
+                            try!(self.term.fg(3));
+                            println!("{}", msg.unwrap_or(""));
+                        },
+                        Some(chan) => {
+                            try!(self.term.fg(9));
+                            print!("{} {} NOTICE: ", chan, Bot::shorten(source.unwrap_or("")));
+                            flush();
+                            try!(self.term.fg(11));
+                            println!("{}", msg.unwrap_or(""));
+                        },
+                        None => println!("HALP: {}", line),
+                    }
+                }
+                &"PRIVMSG" => {
+                    try!(self.term.fg(9));
+                    print!("{} {}: ", params.get(0).unwrap_or(&""), Bot::shorten(source.unwrap_or("")));
+                    flush();
+                    try!(self.term.fg(11));
+                    println!("{}", msg.unwrap_or(""));
+                },
+                &"PING" => try!(self.send_pong(msg)),
+                _ => {
+                    try!(self.term.fg(6));
+                    println!("{}, {}, {}, {}", source, command, params, msg);
+                },
+            }
         }
     }
     fn send(
-        &mut self, source: Option<&str>, command: &str, args: &[&str], message: Option<&str>
+        &mut self, source: Option<&str>, command: &str, params: &[&str], msg: Option<&str>
     ) -> IoResult<()> {
         match source {
             Some(source) => try!(write!(self.cout, ":{} ", source)),
             None => (),
         }
         try!(write!(self.cout, "{} ", command));
-        for arg in args.iter() {
-            try!(write!(self.cout, "{} ", arg));
+        for param in params.iter() {
+            try!(write!(self.cout, "{} ", param));
         }
-        match message {
-            Some(message) => try!(write!(self.cout, ":{} ", message)),
+        match msg {
+            Some(msg) => try!(write!(self.cout, ":{}", msg)),
             None => (),
         }
         try!(write!(self.cout, "\r\n"));
         self.cout.flush()
     }
-    fn send_nick(&mut self) -> IoResult<()> {
-        self.send(None, "NICK", ["FTButt"], None)
+    fn send_nick(&mut self, nick: &str) -> IoResult<()> {
+        self.send(None, "NICK", [nick], None)
+    }
+    fn send_pong(&mut self, msg: Option<&str>) -> IoResult<()> {
+        self.send(None, "PONG", [], msg)
     }
     fn send_user(&mut self) -> IoResult<()> {
         self.send(None, "USER", ["FTButt", "0", "*"], Some("FTButt"))
+    }
+    fn send_join(&mut self, chan: &str) -> IoResult<()> {
+        self.send(None, "JOIN", [], Some(chan))
     }
 }
 
@@ -126,6 +184,6 @@ fn main() {
             Ok(_) => println!("Bot ended ok?"),
             Err(e) => println!("Bot failed: {}", e),
         }
-        sleep(5000);
+        sleep(Duration::seconds(10));
     }
 }
