@@ -1,0 +1,9 @@
+install:
+  - curl https://static.rust-lang.org/rustup.sh | sudo bash -
+script:
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo doc --verbose
+notifications:
+  irc:
+    - "irc.fyrechat.net#vana-commits"
