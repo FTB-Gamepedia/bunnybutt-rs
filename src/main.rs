@@ -1,4 +1,4 @@
-// Copyright © 2014 Peter Atashian
+// Copyright © 2014, Peter Atashian
 
 #![feature(phase)]
 
