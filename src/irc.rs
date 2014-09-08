@@ -1,14 +1,14 @@
 // Copyright © 2014, Peter Atashian
 
-use serialize::json::decode;
-use std::cell::RefCell;
-use std::io::fs::File;
-use std::io::net::tcp::TcpStream;
-use std::io::stdio::flush;
+use serialize::json::{decode};
+use std::cell::{RefCell};
+use std::io::fs::{File};
+use std::io::net::tcp::{TcpStream};
+use std::io::stdio::{stdin};
 use std::io::{BufferedReader, EndOfFile, IoResult, IoError, InvalidInput, BufWriter, OtherIoError};
 use std::sync::{Arc, Mutex};
 use term::{Terminal, WriterWrapper};
-use term::stdout;
+use term::{stdout};
 
 #[deriving(Show)]
 enum Source<'a> {
@@ -61,17 +61,34 @@ impl Bot {
         })))
     }
     pub fn run(bot: Arc<Mutex<Bot>>) -> IoResult<()> {
-        let tcp = {
+        {
             let mut bot = bot.lock();
             try!(bot.send_nick());
             try!(bot.send_user());
-            bot.tcp.borrow().clone()
-        };
-        Bot::read_loop(bot, BufferedReader::new(tcp))
+        }
+        {
+            let bot = bot.clone();
+            spawn(proc() Bot::console_loop(bot).unwrap());
+        }
+        Bot::read_loop(bot)
     }
-    fn read_loop<T>(
-        bot: Arc<Mutex<Bot>>, mut buf: T
-    ) -> IoResult<()> where T: Reader + Buffer {
+    fn console_loop(bot: Arc<Mutex<Bot>>) -> IoResult<()> {
+        let mut cin = stdin();
+        for line in cin.lines() {
+            let line = try!(line);
+            let index = line.as_slice().find(['\r', '\n'].as_slice());
+            let line = line.as_slice().slice_to(index.unwrap_or(line.len()));
+            println!("{}", line.as_bytes());
+            match line {
+                "quit" => break,
+                _ => (),
+            }
+        }
+        println!("Shutting down!");
+        bot.lock().tcp.borrow_mut().close_read()
+    }
+    fn read_loop(bot: Arc<Mutex<Bot>>) -> IoResult<()> {
+        let mut buf = BufferedReader::new(bot.lock().tcp.borrow().clone());
         loop {
             let line = try!(read_line(&mut buf));
             if line.is_empty() { continue }
@@ -86,7 +103,7 @@ impl Bot {
         match (command, args) {
             ("372", [_, motd]) => { // MOTD
                 try!(self.term.fg(5));
-                println!("{}", motd);
+                writeln!(self.term.get_mut(), "{}", motd);
             },
             ("375", _) => {}, // Begin of MOTD
             ("376", _) => { // End of MOTD
@@ -105,24 +122,22 @@ impl Bot {
             },
             ("NOTICE", [chan, msg]) => {
                 try!(self.term.fg(1));
-                print!("{} {} NOTICE: ", chan, source.shorten());
-                flush();
+                write!(self.term.get_mut(), "{} {} NOTICE: ", chan, source.shorten());
                 try!(self.term.fg(3));
-                println!("{}", msg);
+                writeln!(self.term.get_mut(), "{}", msg);
             },
             ("PRIVMSG", [chan, msg]) => {
                 try!(self.term.fg(9));
-                print!("{} {}: ", chan, source.shorten());
-                flush();
+                write!(self.term.get_mut(), "{} {}: ", chan, source.shorten());
                 try!(self.term.fg(11));
-                println!("{}", msg);
+                writeln!(self.term.get_mut(), "{}", msg);
             },
             ("PING", [msg]) => {
                 try!(self.send_pong(Some(msg)));
             },
             _ => {
                 try!(self.term.fg(6));
-                println!("{}, {}, {}", source.shorten(), command, args);
+                writeln!(self.term.get_mut(), "{}, {}, {}", source.shorten(), command, args);
             },
         }
         Ok(())
