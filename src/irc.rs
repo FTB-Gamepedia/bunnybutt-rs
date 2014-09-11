@@ -103,7 +103,7 @@ impl Bot {
         match (command, args) {
             ("372", [_, motd]) => { // MOTD
                 try!(self.term.fg(5));
-                writeln!(self.term.get_mut(), "{}", motd);
+                try!(writeln!(self.term.get_mut(), "{}", motd));
             },
             ("375", _) => {}, // Begin of MOTD
             ("376", _) => { // End of MOTD
@@ -122,22 +122,27 @@ impl Bot {
             },
             ("NOTICE", [chan, msg]) => {
                 try!(self.term.fg(1));
-                write!(self.term.get_mut(), "{} {} NOTICE: ", chan, source.shorten());
+                try!(write!(self.term.get_mut(), "{} {} NOTICE: ", chan, source.shorten()));
                 try!(self.term.fg(3));
-                writeln!(self.term.get_mut(), "{}", msg);
+                try!(writeln!(self.term.get_mut(), "{}", msg));
             },
             ("PRIVMSG", [chan, msg]) => {
                 try!(self.term.fg(9));
-                write!(self.term.get_mut(), "{} {}: ", chan, source.shorten());
+                try!(write!(self.term.get_mut(), "{} {}: ", chan, source.shorten()));
                 try!(self.term.fg(11));
-                writeln!(self.term.get_mut(), "{}", msg);
+                try!(writeln!(self.term.get_mut(), "{}", msg));
+                if msg.starts_with("@>") {
+                    try!(self.send_privmsg("#vana", msg.slice_from(2)));
+                } else if msg.starts_with("@!") {
+                    try!(self.send_raw(b"PRIVMSG #vana :".to_vec().append([0x80]).append(b"\r\n").as_slice()))
+                }
             },
             ("PING", [msg]) => {
                 try!(self.send_pong(Some(msg)));
             },
             _ => {
                 try!(self.term.fg(6));
-                writeln!(self.term.get_mut(), "{}, {}, {}", source.shorten(), command, args);
+                try!(writeln!(self.term.get_mut(), "{}, {}, {}", source.shorten(), command, args));
             },
         }
         Ok(())
@@ -163,7 +168,13 @@ impl Bot {
             try!(write!(buf, "\r\n"));
             try!(buf.tell())
         };
-        self.tcp.borrow_mut().write(bufdata.slice_to(pos as uint))
+        self.send_raw(bufdata.slice_to(pos as uint))
+    }
+    fn send_raw(&self, data: &[u8]) -> IoResult<()> {
+        self.tcp.borrow_mut().write(data)
+    }
+    fn send_privmsg(&self, target: &str, msg: &str) -> IoResult<()> {
+        self.send(None, "PRIVMSG", [target], Some(msg))
     }
     fn send_join(&self, chan: &str) -> IoResult<()> {
         self.send(None, "JOIN", [], Some(chan))
