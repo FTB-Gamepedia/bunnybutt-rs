@@ -46,7 +46,9 @@ use url::form_urlencoded::serialize;
 
 
 fn main() {
-    try(proc() run_bot()).unwrap();
+    loop {
+        let _ = try(proc() run_bot());
+    }
 }
 fn run_bot() {
     let config = Config {
