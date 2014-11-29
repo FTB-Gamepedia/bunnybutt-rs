@@ -36,6 +36,7 @@ use std::collections::HashMap;
 use std::io::fs::File;
 use std::io::timer::sleep;
 use std::sync::Arc;
+use std::task::try;
 use std::time::Duration;
 use time::{
     Tm,
@@ -43,7 +44,11 @@ use time::{
 };
 use url::form_urlencoded::serialize;
 
+
 fn main() {
+    try(proc() run_bot()).unwrap();
+}
+fn run_bot() {
     let config = Config {
         owners: Vec::new(),
         nickname: "PonyButt".into_string(),
