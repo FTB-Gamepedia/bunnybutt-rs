@@ -50,10 +50,10 @@ fn main() {
         username: "PonyButt".into_string(),
         realname: "PonyButt".into_string(),
         password: "".into_string(),
-        server: "irc.fyrechat.net".into_string(),
+        server: "irc.esper.net".into_string(),
         port: 6667,
         use_ssl: false,
-        channels: vec!["#vana".into_string()],
+        channels: vec!["#FTB-Wiki-recentchanges".into_string()],
         options: HashMap::new(),
     };
     let irc_server = Arc::new(IrcServer::from_config(config).unwrap());
@@ -72,7 +72,7 @@ fn main() {
         }
         let now = now_utc();
         for change in api.get_changes(last, now).iter() {
-            server.send_privmsg("#vana", change[]).unwrap();
+            server.send_privmsg("#FTB-Wiki-recentchanges", change[]).unwrap();
             sleep(Duration::seconds(2));
         }
         last = now;
@@ -103,7 +103,8 @@ impl WikiApi {
             cookieprefix: String,
             sessionid: String,
         }
-        let url = make_url(&[("format", "json"), ("action", "login"), ("lgname", username), ("lgpassword", password)]);
+        let url = make_url(&[("format", "json"), ("action", "login"), ("lgname", username),
+            ("lgpassword", password)]);
         let mut request = Request::new(Method::Post, Url::parse(url[]).unwrap()).unwrap();
         request.headers_mut().set(UserAgent("PonyButt".into_string()));
         let mut response = request.start().unwrap().send().unwrap();
@@ -127,7 +128,8 @@ impl WikiApi {
             cookieprefix: String,
             sessionid: String,
         }
-        let url = make_url(&[("format", "json"), ("action", "login"), ("lgname", username), ("lgpassword", password), ("lgtoken", token)]);
+        let url = make_url(&[("format", "json"), ("action", "login"), ("lgname", username),
+            ("lgpassword", password), ("lgtoken", token)]);
         let request = self.make_request(url[], Method::Post);
         let mut response = request.start().unwrap().send().unwrap();
         let text = response.read_to_string().unwrap();
@@ -155,14 +157,37 @@ impl WikiApi {
         // yyyymmddhhmmss
         let from = from.strftime("%Y%m%d%H%M%S").unwrap().to_string();
         let to = to.strftime("%Y%m%d%H%M%S").unwrap().to_string();
-        let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"), ("rclimit", "5000"), ("rcprop", "title|user|parsedcomment|flags|sizes|loginfo"), ("rcdir", "newer"), ("rcstart", from[]), ("rcend", to[])]);
+        let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"),
+            ("rclimit", "5000"), ("rcprop", "title|user|comment|flags|sizes|loginfo"),
+            ("rcdir", "newer"), ("rcstart", from[]), ("rcend", to[])]);
         let request = self.make_request(url[], Method::Get);
         let mut response = request.start().unwrap().send().unwrap();
         let text = response.read_to_string().unwrap();
         let json: Json = from_str(text[]).unwrap();
-        let changes = json.find_path(&["query", "recentchanges"]).unwrap().as_array().unwrap();
+        let changes = json["query"]["recentchanges"].as_array().unwrap();
         changes.iter().map(|change| {
-            change.to_string()
+            println!("{}", change);
+            let ctype = change["type"].as_string().unwrap();
+            let oldlen = change["oldlen"].as_i64().unwrap();
+            let newlen = change["newlen"].as_i64().unwrap();
+            let diff = format!("({:+})", newlen - oldlen);
+            let title = change["title"].as_string().unwrap();
+            let comment = change["comment"].as_string().unwrap();
+            let user = change["user"].as_string().unwrap();
+            let logtype = change.find("logtype").and_then(|x| x.as_string());
+            let kind = format!("{}{}{}{}{}",
+                change.find("new").map_or("", |_| "new "),
+                change.find("bot").map_or("", |_| "bot "),
+                change.find("minor").map_or("", |_| "minor "),
+                logtype.map_or("", |x| x[]), ctype);
+            let thing = change.find("logaction").and_then(|x| x.as_string())
+                .unwrap_or(diff[]);
+            let comment = if comment.is_empty() {
+                String::new()
+            } else {
+                format!("({})", comment)
+            };
+            format!(r#"[{}] {} {} — {} {}"#, kind, thing, title, user, comment)
         }).collect()
     }
 }
