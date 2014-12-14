@@ -13,7 +13,10 @@ extern crate time;
 extern crate url;
 
 use cookie::Cookie;
-use hyper::Url;
+use hyper::{
+    HttpError,
+    Url,
+};
 use hyper::client::request::Request;
 use hyper::header::common::{
     Cookies,
@@ -22,7 +25,6 @@ use hyper::header::common::{
 };
 use hyper::method::Method;
 use hyper::net::Fresh;
-use irc::data::config::Config;
 use irc::server::{
     IrcServer,
     Server,
@@ -32,14 +34,17 @@ use serialize::json::{
     Json,
     decode,
 };
-use std::collections::HashMap;
+use std::error::FromError;
+use std::io::IoError;
 use std::io::fs::File;
 use std::io::timer::sleep;
 use std::sync::Arc;
 use std::task::try;
 use std::time::Duration;
 use time::{
+    ParseError,
     Tm,
+    at_utc,
     now_utc,
 };
 use url::form_urlencoded::serialize;
@@ -50,43 +55,67 @@ fn main() {
         let _ = try(proc() run_bot());
     }
 }
+fn get_time() -> Tm {
+    at_utc(now_utc().to_timespec() + Duration::seconds(-2))
+}
 fn run_bot() {
-    let config = Config {
-        owners: Vec::new(),
-        nickname: "PonyButt".into_string(),
-        username: "PonyButt".into_string(),
-        realname: "PonyButt".into_string(),
-        password: "".into_string(),
-        server: "irc.esper.net".into_string(),
-        port: 6667,
-        use_ssl: false,
-        channels: vec!["#FTB-Wiki-recentchanges".into_string()],
-        options: HashMap::new(),
-    };
+    let mut file = File::open(&Path::new("irc.json")).unwrap();
+    let data = file.read_to_string().unwrap();
+    let config = decode(data[]).unwrap();
     let irc_server = Arc::new(IrcServer::from_config(config).unwrap());
     let server = Wrapper::new(&*irc_server);
     server.identify().unwrap();
+    let read_irc = irc_server.clone();
+    spawn(proc() { read_irc.iter().count(); });
     let api = WikiApi::login();
-    let mut iter = irc_server.iter();
-    let mut last = now_utc();
+    let mut last = get_time();
     loop {
-        loop {
-            let now = now_utc();
-            if now.to_timespec() - last.to_timespec() > Duration::seconds(15) {
-                break;
-            }
-            iter.next();
-        }
-        let now = now_utc();
-        for change in api.get_changes(last, now).iter() {
-            server.send_privmsg("#FTB-Wiki-recentchanges", change[]).unwrap();
-            sleep(Duration::seconds(2));
+        let now = get_time();
+        match api.get_changes(last, now) {
+            Ok(changes) => for change in changes.into_iter() {
+                match change {
+                    Ok(change) => {
+                        server.send_privmsg("#FTB-Wiki-recentchanges", change[]).unwrap();
+                        sleep(Duration::seconds(2));
+                    },
+                    Err(e) => println!("ERROR: {}", e),
+                }
+            },
+            Err(e) => println!("SUPER ERROR: {}", e),
         }
         last = now;
+        sleep(Duration::seconds(15));
     }
 }
 fn make_url(args: &[(&str, &str)]) -> String {
     format!("http://ftb.gamepedia.com/api.php?{}", serialize(args.iter().map(|&x| x)))
+}
+#[deriving(Show)]
+struct WikiError(String);
+impl FromError<ParseError> for WikiError {
+    fn from_error(err: ParseError) -> WikiError {
+        WikiError(err.to_string())
+    }
+}
+impl FromError<HttpError> for WikiError {
+    fn from_error(err: HttpError) -> WikiError {
+        WikiError(err.to_string())
+    }
+}
+impl FromError<IoError> for WikiError {
+    fn from_error(err: IoError) -> WikiError {
+        WikiError(err.to_string())
+    }
+}
+impl<'a> FromError<&'a Json> for WikiError {
+    fn from_error(err: &'a Json) -> WikiError {
+        WikiError(err.to_pretty_str())
+    }
+}
+impl<'a> FromError<&'a str> for WikiError {
+    fn from_error(err: &'a str) -> WikiError {
+        WikiError(err.into_string())
+    }
 }
 struct WikiApi {
     cookies: Vec<Cookie>,
@@ -149,7 +178,7 @@ impl WikiApi {
             username: String,
             password: String,
         }
-        let mut file = File::open(&Path::new("config.json")).unwrap();
+        let mut file = File::open(&Path::new("ftb.json")).unwrap();
         let data = file.read_to_string().unwrap();
         let config: LoginConfig = decode(data[]).unwrap();
         let (cookies, token) = WikiApi::login_first(config.username[], config.password[]);
@@ -160,41 +189,30 @@ impl WikiApi {
         println!("Logged in: {}", token);
         api
     }
-    fn get_changes(&self, from: Tm, to: Tm) -> Vec<String> {
+    fn get_changes(&self, from: Tm, to: Tm) -> Result<Vec<Result<String, WikiError>>, WikiError> {
         // yyyymmddhhmmss
-        let from = from.strftime("%Y%m%d%H%M%S").unwrap().to_string();
-        let to = to.strftime("%Y%m%d%H%M%S").unwrap().to_string();
+        let from = try!(from.strftime("%Y%m%d%H%M%S")).to_string();
+        let to = try!(to.strftime("%Y%m%d%H%M%S")).to_string();
         let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"),
-            ("rclimit", "5000"), ("rcprop", "title|user|comment|flags|sizes|loginfo"),
+            ("rclimit", "5000"), ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"),
             ("rcdir", "newer"), ("rcstart", from[]), ("rcend", to[])]);
         let request = self.make_request(url[], Method::Get);
-        let mut response = request.start().unwrap().send().unwrap();
-        let text = response.read_to_string().unwrap();
-        let json: Json = from_str(text[]).unwrap();
-        let changes = json["query"]["recentchanges"].as_array().unwrap();
-        changes.iter().map(|change| {
-            println!("{}", change);
-            let ctype = change["type"].as_string().unwrap();
-            let oldlen = change["oldlen"].as_i64().unwrap();
-            let newlen = change["newlen"].as_i64().unwrap();
-            let diff = format!("({:+})", newlen - oldlen);
-            let title = change["title"].as_string().unwrap();
-            let comment = change["comment"].as_string().unwrap();
-            let user = change["user"].as_string().unwrap();
-            let logtype = change.find("logtype").and_then(|x| x.as_string());
-            let kind = format!("{}{}{}{}{}",
-                change.find("new").map_or("", |_| "new "),
-                change.find("bot").map_or("", |_| "bot "),
-                change.find("minor").map_or("", |_| "minor "),
-                logtype.map_or("", |x| x[]), ctype);
-            let thing = change.find("logaction").and_then(|x| x.as_string())
-                .unwrap_or(diff[]);
-            let comment = if comment.is_empty() {
-                String::new()
-            } else {
-                format!("({})", comment)
-            };
-            format!(r#"[{}] {} {} — {} {}"#, kind, thing, title, user, comment)
-        }).collect()
+        let mut response = try!(request.start().and_then(|x| x.send()));
+        let text = try!(response.read_to_string());
+        let json: Json = try!(from_str(text[]).ok_or("received invalid json"));
+        let changes = try!(json.find_path(&["query", "recentchanges"]).and_then(|c| c.as_array())
+            .ok_or(&json));
+        Ok(changes.iter().map(|change| {
+            let ctype = try!(change.find("type").and_then(|x| x.as_string()).ok_or(&json));
+            match ctype {
+                "edit" => {
+                    let comment = try!(change.find("comment").and_then(|x| x.as_string()).ok_or(&json));
+                    let title = try!(change.find("title").and_then(|x| x.as_string()).ok_or(&json));
+                    let user = try!(change.find("user").and_then(|x| x.as_string()).ok_or(&json));
+                    Ok(format!("[Edit] {} — {} ({})", title, user, comment))
+                },
+                _ => try!(Err(&json)),
+            }
+        }).collect())
     }
 }

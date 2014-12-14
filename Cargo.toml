@@ -7,7 +7,7 @@ authors = ["Peter Atashian <retep998@gmail.com>"]
 git = "https://github.com/aaronweiss74/irc"
 
 [dependencies.hyper]
-git = "https://github.com/retep998/hyper"
+git = "https://github.com/hyperium/hyper"
 
 [dependencies.time]
 git = "https://github.com/rust-lang/time"
