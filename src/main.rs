@@ -183,8 +183,8 @@ impl WikiApi {
         // yyyymmddhhmmss
         let from = try!(from.strftime("%Y%m%d%H%M%S")).to_string();
         let to = try!(to.strftime("%Y%m%d%H%M%S")).to_string();
-        let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"),
-            ("rclimit", "5000"), ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"),
+        let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"), ("rclimit", "5000"),
+            ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"),
             ("rcdir", "newer"), ("rcstart", from[]), ("rcend", to[])]);
         let request = self.make_request(url[], Method::Get);
         let mut response = try!(request.start().and_then(|x| x.send()));
@@ -193,31 +193,52 @@ impl WikiApi {
         let changes = try!(json.find_path(&["query", "recentchanges"]).and_then(|c| c.as_array())
             .ok_or(&json));
         Ok(changes.iter().map(|change| {
-            let ctype = try!(change.find("type").and_then(|x| x.as_string()).ok_or(change));
-            match ctype {
+            let gets = |&:x: &str| change.find(x).and_then(|x| x.as_string()).ok_or(change);
+            match try!(gets("type")) {
                 "edit" => {
-                    let comment = try!(change.find("comment").and_then(|x| x.as_string()).ok_or(change));
-                    let title = try!(change.find("title").and_then(|x| x.as_string()).ok_or(change));
-                    let user = try!(change.find("user").and_then(|x| x.as_string()).ok_or(change));
+                    let comment = try!(gets("comment"));
+                    let title = try!(gets("title"));
+                    let user = try!(gets("user"));
                     let comment = if comment.is_empty() {
                         format!("– No edit summary")
                     } else {
                         format!("({})", comment)
                     };
-                    Ok(format!("[Edit] {} – {} {}", title, user, comment))
+                    Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title, user, comment))
                 },
                 "log" => {
-                    let logtype = try!(change.find("logtype").and_then(|x| x.as_string()).ok_or(change));
-                    let logaction = try!(change.find("logaction").and_then(|x| x.as_string()).ok_or(change));
+                    let logtype = try!(gets("logtype"));
+                    let logaction = try!(gets("logaction"));
                     match (logtype, logaction) {
                         ("tilesheet", "createtile") => {
-                            let user = try!(change.find("user").and_then(|x| x.as_string()).ok_or(change));
-                            let item = try!(change.find("item").and_then(|x| x.as_string()).ok_or(change));
-                            let tmod = try!(change.find("mod").and_then(|x| x.as_string()).ok_or(change));
-                            Ok(format!("[Tilesheet] {} added {} from {}", user, item, tmod))
+                            let user = try!(gets("user"));
+                            let item = try!(gets("item"));
+                            let tmod = try!(gets("mod"));
+                            Ok(format!("[\u{2}\u{3}03Tilesheet\u{f}] \u{2}{}\u{f} added \u{2}{}\u{f} from \u{2}{}\u{f}", user, item, tmod))
+                        },
+                        ("upload", "upload") => {
+                            let title = try!(gets("title"));
+                            let user = try!(gets("user"));
+                            Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded \u{2}{}\u{f}", user, title))
+                        },
+                        ("upload", "overwrite") => {
+                            let title = try!(gets("title"));
+                            let user = try!(gets("user"));
+                            Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded new version of \u{2}{}\u{f}", user, title))
                         },
                         _ => try!(Err(change)),
                     }
+                },
+                "new" => {
+                    let comment = try!(gets("comment"));
+                    let title = try!(gets("title"));
+                    let user = try!(gets("user"));
+                    let comment = if comment.is_empty() {
+                        format!("– No edit summary")
+                    } else {
+                        format!("({})", comment)
+                    };
+                    Ok(format!("[\u{2}\u{3}03New\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title, user, comment))
                 },
                 _ => try!(Err(change)),
             }
