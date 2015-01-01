@@ -8,15 +8,12 @@ extern crate irc;
 #[phase(plugin)]
 extern crate regex_macros;
 extern crate regex;
-extern crate serialize;
+extern crate "rustc-serialize" as rustc_serialize;
 extern crate time;
 extern crate url;
 
 use cookie::Cookie;
-use hyper::{
-    HttpError,
-    Url,
-};
+use hyper::{HttpError, Url};
 use hyper::client::request::Request;
 use hyper::header::common::{
     Cookies,
@@ -25,21 +22,16 @@ use hyper::header::common::{
 };
 use hyper::method::Method;
 use hyper::net::Fresh;
-use irc::server::{
-    IrcServer,
-    Server,
-};
+use irc::server::{IrcServer, Server};
 use irc::server::utils::Wrapper;
-use serialize::json::{
-    Json,
-    decode,
-};
+use rustc_serialize::json::{Json, decode};
+use std::borrow::ToOwned;
 use std::error::FromError;
 use std::io::IoError;
 use std::io::fs::File;
 use std::io::timer::sleep;
 use std::sync::Arc;
-use std::task::try;
+use std::thread::Thread;
 use std::time::Duration;
 use time::{
     ParseError,
@@ -51,9 +43,7 @@ use url::form_urlencoded::serialize;
 
 
 fn main() {
-    loop {
-        let _ = try(proc() run_bot());
-    }
+    run_bot();
 }
 fn get_time() -> Tm {
     at_utc(now_utc().to_timespec() + Duration::seconds(-2))
@@ -66,7 +56,7 @@ fn run_bot() {
     let server = Wrapper::new(&*irc_server);
     server.identify().unwrap();
     let read_irc = irc_server.clone();
-    spawn(proc() { read_irc.iter().count(); });
+    Thread::spawn(move|| { read_irc.iter().count(); }).detach();
     let api = WikiApi::login();
     let mut last = get_time();
     loop {
@@ -114,7 +104,7 @@ impl<'a> FromError<&'a Json> for WikiError {
 }
 impl<'a> FromError<&'a str> for WikiError {
     fn from_error(err: &'a str) -> WikiError {
-        WikiError(err.into_string())
+        WikiError(err.to_owned())
     }
 }
 struct WikiApi {
@@ -123,16 +113,16 @@ struct WikiApi {
 impl WikiApi {
     fn make_request(&self, url: &str, method: Method) -> Request<Fresh> {
         let mut request = Request::new(method, Url::parse(url).unwrap()).unwrap();
-        request.headers_mut().set(UserAgent("PonyButt".into_string()));
+        request.headers_mut().set(UserAgent("PonyButt".to_owned()));
         request.headers_mut().set(Cookies(self.cookies.clone()));
         request
     }
     fn login_first(username: &str, password: &str) -> (Vec<Cookie>, String) {
-        #[deriving(Decodable, Show)]
+        #[deriving(RustcDecodable, Show)]
         struct JsonLogin {
             login: JsonLoginInner,
         }
-        #[deriving(Decodable, Show)]
+        #[deriving(RustcDecodable, Show)]
         struct JsonLoginInner {
             result: String,
             token: String,
@@ -142,7 +132,7 @@ impl WikiApi {
         let url = make_url(&[("format", "json"), ("action", "login"), ("lgname", username),
             ("lgpassword", password)]);
         let mut request = Request::new(Method::Post, Url::parse(url[]).unwrap()).unwrap();
-        request.headers_mut().set(UserAgent("PonyButt".into_string()));
+        request.headers_mut().set(UserAgent("PonyButt".to_owned()));
         let mut response = request.start().unwrap().send().unwrap();
         let text = response.read_to_string().unwrap();
         let login = decode::<JsonLogin>(text[]).unwrap().login;
@@ -151,11 +141,11 @@ impl WikiApi {
         (cookies, login.token)
     }
     fn login_final(&self, username: &str, password: &str, token: &str) {
-        #[deriving(Decodable, Show)]
+        #[deriving(RustcDecodable, Show)]
         struct JsonLoginFinal {
             login: JsonLoginFinalInner,
         }
-        #[deriving(Decodable, Show)]
+        #[deriving(RustcDecodable, Show)]
         struct JsonLoginFinalInner {
             result: String,
             lguserid: i32,
@@ -173,7 +163,7 @@ impl WikiApi {
         assert!(login.result[] == "Success");
     }
     fn login() -> WikiApi {
-        #[deriving(Decodable, Show)]
+        #[deriving(RustcDecodable, Show)]
         struct LoginConfig {
             username: String,
             password: String,
@@ -199,19 +189,37 @@ impl WikiApi {
         let request = self.make_request(url[], Method::Get);
         let mut response = try!(request.start().and_then(|x| x.send()));
         let text = try!(response.read_to_string());
-        let json: Json = try!(from_str(text[]).ok_or("received invalid json"));
+        let json: Json = try!(text[].parse().ok_or(text[]));
         let changes = try!(json.find_path(&["query", "recentchanges"]).and_then(|c| c.as_array())
             .ok_or(&json));
         Ok(changes.iter().map(|change| {
-            let ctype = try!(change.find("type").and_then(|x| x.as_string()).ok_or(&json));
+            let ctype = try!(change.find("type").and_then(|x| x.as_string()).ok_or(change));
             match ctype {
                 "edit" => {
-                    let comment = try!(change.find("comment").and_then(|x| x.as_string()).ok_or(&json));
-                    let title = try!(change.find("title").and_then(|x| x.as_string()).ok_or(&json));
-                    let user = try!(change.find("user").and_then(|x| x.as_string()).ok_or(&json));
-                    Ok(format!("[Edit] {} — {} ({})", title, user, comment))
+                    let comment = try!(change.find("comment").and_then(|x| x.as_string()).ok_or(change));
+                    let title = try!(change.find("title").and_then(|x| x.as_string()).ok_or(change));
+                    let user = try!(change.find("user").and_then(|x| x.as_string()).ok_or(change));
+                    let comment = if comment.is_empty() {
+                        format!("– No edit summary")
+                    } else {
+                        format!("({})", comment)
+                    };
+                    Ok(format!("[Edit] {} – {} {}", title, user, comment))
                 },
-                _ => try!(Err(&json)),
+                "log" => {
+                    let logtype = try!(change.find("logtype").and_then(|x| x.as_string()).ok_or(change));
+                    let logaction = try!(change.find("logaction").and_then(|x| x.as_string()).ok_or(change));
+                    match (logtype, logaction) {
+                        ("tilesheet", "createtile") => {
+                            let user = try!(change.find("user").and_then(|x| x.as_string()).ok_or(change));
+                            let item = try!(change.find("item").and_then(|x| x.as_string()).ok_or(change));
+                            let tmod = try!(change.find("mod").and_then(|x| x.as_string()).ok_or(change));
+                            Ok(format!("[Tilesheet] {} added {} from {}", user, item, tmod))
+                        },
+                        _ => try!(Err(change)),
+                    }
+                },
+                _ => try!(Err(change)),
             }
         }).collect())
     }

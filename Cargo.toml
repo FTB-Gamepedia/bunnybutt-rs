@@ -3,11 +3,9 @@ name = "ircbutt"
 version = "0.1.0"
 authors = ["Peter Atashian <retep998@gmail.com>"]
 
-[dependencies.irc]
-git = "https://github.com/aaronweiss74/irc"
-
-[dependencies.hyper]
-git = "https://github.com/hyperium/hyper"
-
-[dependencies.time]
-git = "https://github.com/rust-lang/time"
+[dependencies]
+regex = "*"
+rustc-serialize = "*"
+time = "*"
+hyper = "*"
+irc = "*"
