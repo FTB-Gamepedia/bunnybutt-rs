@@ -216,6 +216,22 @@ impl WikiApi {
                             let tmod = try!(gets("mod"));
                             Ok(format!("[\u{2}\u{3}03Tilesheet\u{f}] \u{2}{}\u{f} added \u{2}{}\u{f} from \u{2}{}\u{f}", user, item, tmod))
                         },
+                        ("oredict", "createentry") => {
+                            let user = try!(gets("user"));
+                            let item = try!(gets("item"));
+                            let tmod = try!(gets("mod"));
+                            let tag = try!(gets("tag"));
+                            let flags = try!(gets("flags"));
+                            Ok(format!("[\u{2}\u{3}03Oredict\u{f}] \u{2}{}\u{f} added \u{2}{}\u{f} as \u{2}{}\u{f} from \u{2}{}\u{f} with flags \u{2}{}\u{f}", user, tag, item, tmod, flags))
+                        },
+                        ("oredict", "editentry") => {
+                            let user = try!(gets("user"));
+                            let item = try!(gets("item"));
+                            let tmod = try!(gets("mod"));
+                            let tag = try!(gets("tag"));
+                            let diff = try!(gets("diff"));
+                            Ok(format!("[\u{2}\u{3}03Oredict\u{f}] \u{2}{}\u{f} edited \u{2}{}\u{f} as \u{2}{}\u{f} from \u{2}{}\u{f} ({})", user, tag, item, tmod, diff))
+                        },
                         ("upload", "upload") => {
                             let title = try!(gets("title"));
                             let user = try!(gets("user"));
@@ -225,6 +241,18 @@ impl WikiApi {
                             let title = try!(gets("title"));
                             let user = try!(gets("user"));
                             Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded new version of \u{2}{}\u{f}", user, title))
+                        },
+                        ("move", "move") => {
+                            let title = try!(gets("title"));
+                            let user = try!(gets("user"));
+                            let comment = try!(gets("comment"));
+                            let new_title = change.find("move").and_then(|x| x.find("new_title")).and_then(|x| x.as_string()).ok_or(change);
+                            let comment = if comment.is_empty() {
+                                format!("– No edit summary")
+                            } else {
+                                format!("({})", comment)
+                            };
+                            Ok(format!("[\u{2}\u{3}03Move\u{f}] \u{2}{}\u{f} moved \u{2}{}\u{f} to \u{2}{}\u{f} {}", user, title, new_title, comment))
                         },
                         _ => try!(Err(change)),
                     }
