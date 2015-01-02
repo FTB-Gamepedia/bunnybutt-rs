@@ -48,15 +48,35 @@ fn main() {
 fn get_time() -> Tm {
     at_utc(now_utc().to_timespec() + Duration::seconds(-2))
 }
+// FIXME - unable to infer enough type information about `_`; type annotations required
+#[allow(unreachable_code)]
 fn run_bot() {
     let mut file = File::open(&Path::new("irc.json")).unwrap();
     let data = file.read_to_string().unwrap();
     let config = decode(data[]).unwrap();
     let irc_server = Arc::new(IrcServer::from_config(config).unwrap());
+    irc_server.conn().set_keepalive(Some(60)).unwrap();
     let server = Wrapper::new(&*irc_server);
     server.identify().unwrap();
     let read_irc = irc_server.clone();
-    Thread::spawn(move|| { read_irc.iter().count(); }).detach();
+    Thread::spawn(move|| {
+        let server = Wrapper::new(&*read_irc);
+        let mut file = File::create(&Path::new("irc.txt")).unwrap();
+        loop {
+            for msg in read_irc.iter() {
+                match msg {
+                    Ok(msg) => write!(&mut file, "{}", msg.into_string()).unwrap(),
+                    Err(e) => {
+                        println!("IRC ERROR: {}", e);
+                        break;
+                    },
+                }
+            }
+            read_irc.reconnect().unwrap();
+            server.identify().unwrap();
+        }
+        () // FIXME - unable to infer enough type information about `_`; type annotations required
+    }).detach();
     let api = WikiApi::login();
     let mut last = get_time();
     loop {
@@ -183,9 +203,10 @@ impl WikiApi {
         // yyyymmddhhmmss
         let from = try!(from.strftime("%Y%m%d%H%M%S")).to_string();
         let to = try!(to.strftime("%Y%m%d%H%M%S")).to_string();
-        let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"), ("rclimit", "5000"),
-            ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"),
-            ("rcdir", "newer"), ("rcstart", from[]), ("rcend", to[])]);
+        let url = make_url(&[("format", "json"), ("action", "query"), ("list", "recentchanges"),
+            ("rclimit", "5000"), ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|ids\
+            |sha1|sizes|redirect|patrolled|loginfo|tags|flags"), ("rcdir", "newer"),
+            ("rcstart", from[]), ("rcend", to[])]);
         let request = self.make_request(url[], Method::Get);
         let mut response = try!(request.start().and_then(|x| x.send()));
         let text = try!(response.read_to_string());
@@ -204,7 +225,8 @@ impl WikiApi {
                     } else {
                         format!("({})", comment)
                     };
-                    Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title, user, comment))
+                    Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title,
+                        user, comment))
                 },
                 "log" => {
                     let logtype = try!(gets("logtype"));
@@ -214,7 +236,8 @@ impl WikiApi {
                             let user = try!(gets("user"));
                             let item = try!(gets("item"));
                             let tmod = try!(gets("mod"));
-                            Ok(format!("[\u{2}\u{3}03Tilesheet\u{f}] \u{2}{}\u{f} added \u{2}{}\u{f} from \u{2}{}\u{f}", user, item, tmod))
+                            Ok(format!("[\u{2}\u{3}03Tilesheet\u{f}] \u{2}{}\u{f} added \
+                                \u{2}{}\u{f} from \u{2}{}\u{f}", user, item, tmod))
                         },
                         ("oredict", "createentry") => {
                             let user = try!(gets("user"));
@@ -222,7 +245,9 @@ impl WikiApi {
                             let tmod = try!(gets("mod"));
                             let tag = try!(gets("tag"));
                             let flags = try!(gets("flags"));
-                            Ok(format!("[\u{2}\u{3}03Oredict\u{f}] \u{2}{}\u{f} added \u{2}{}\u{f} as \u{2}{}\u{f} from \u{2}{}\u{f} with flags \u{2}{}\u{f}", user, tag, item, tmod, flags))
+                            Ok(format!("[\u{2}\u{3}03Oredict\u{f}] \u{2}{}\u{f} added \u{2}{}\u{f} \
+                                 as \u{2}{}\u{f} from \u{2}{}\u{f} with flags \u{2}{}\u{f}", user,
+                                 tag, item, tmod, flags))
                         },
                         ("oredict", "editentry") => {
                             let user = try!(gets("user"));
@@ -230,29 +255,39 @@ impl WikiApi {
                             let tmod = try!(gets("mod"));
                             let tag = try!(gets("tag"));
                             let diff = try!(gets("diff"));
-                            Ok(format!("[\u{2}\u{3}03Oredict\u{f}] \u{2}{}\u{f} edited \u{2}{}\u{f} as \u{2}{}\u{f} from \u{2}{}\u{f} ({})", user, tag, item, tmod, diff))
+                            Ok(format!("[\u{2}\u{3}03Oredict\u{f}] \u{2}{}\u{f} edited \
+                                \u{2}{}\u{f} as \u{2}{}\u{f} from \u{2}{}\u{f} ({})", user, tag,
+                                item, tmod, diff))
                         },
                         ("upload", "upload") => {
                             let title = try!(gets("title"));
                             let user = try!(gets("user"));
-                            Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded \u{2}{}\u{f}", user, title))
+                            Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded \
+                                \u{2}{}\u{f}", user, title))
                         },
                         ("upload", "overwrite") => {
                             let title = try!(gets("title"));
                             let user = try!(gets("user"));
-                            Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded new version of \u{2}{}\u{f}", user, title))
+                            Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded new \
+                                version of \u{2}{}\u{f}", user, title))
+                        },
+                        ("newusers", "create") => {
+                            let user = try!(gets("user"));
+                            Ok(format!("[\u{2}\u{3}03UserUpload\u{f}] New user \u{2}{}\u{f}", user))
                         },
                         ("move", "move") => {
                             let title = try!(gets("title"));
                             let user = try!(gets("user"));
                             let comment = try!(gets("comment"));
-                            let new_title = change.find("move").and_then(|x| x.find("new_title")).and_then(|x| x.as_string()).ok_or(change);
+                            let new_title = change.find("move").and_then(|x| x.find("new_title"))
+                                .and_then(|x| x.as_string()).ok_or(change);
                             let comment = if comment.is_empty() {
                                 format!("– No edit summary")
                             } else {
                                 format!("({})", comment)
                             };
-                            Ok(format!("[\u{2}\u{3}03Move\u{f}] \u{2}{}\u{f} moved \u{2}{}\u{f} to \u{2}{}\u{f} {}", user, title, new_title, comment))
+                            Ok(format!("[\u{2}\u{3}03Move\u{f}] \u{2}{}\u{f} moved \u{2}{}\u{f} to \
+                                \u{2}{}\u{f} {}", user, title, new_title, comment))
                         },
                         _ => try!(Err(change)),
                     }
@@ -266,7 +301,8 @@ impl WikiApi {
                     } else {
                         format!("({})", comment)
                     };
-                    Ok(format!("[\u{2}\u{3}03New\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title, user, comment))
+                    Ok(format!("[\u{2}\u{3}03New\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title,
+                        user, comment))
                 },
                 _ => try!(Err(change)),
             }
