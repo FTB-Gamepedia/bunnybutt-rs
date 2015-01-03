@@ -271,6 +271,18 @@ impl WikiApi {
                             Ok(format!("[\u{2}\u{3}03Upload\u{f}] \u{2}{}\u{f} uploaded new \
                                 version of \u{2}{}\u{f}", user, title))
                         },
+                        ("delete", "delete") => {
+                            let title = try!(gets("title"));
+                            let user = try!(gets("user"));
+                            Ok(format!("[\u{2}\u{3}03Delete\u{f}] \u{2}{}\u{f} deleted \
+                                \u{2}{}\u{f}", user, title))
+                        },
+                        ("pagetranslation", "mark") => {
+                            let title = try!(gets("title"));
+                            let user = try!(gets("user"));
+                            Ok(format!("[\u{2}\u{3}03Translation\u{f}] \u{2}{}\u{f} marked \
+                                \u{2}{}\u{f} for translation", user, title))
+                        },
                         ("newusers", "create") => {
                             let user = try!(gets("user"));
                             Ok(format!("[\u{2}\u{3}03UserUpload\u{f}] New user \u{2}{}\u{f}", user))
