@@ -3,12 +3,9 @@ name = "ircbutt"
 version = "0.1.0"
 authors = ["Peter Atashian <retep998@gmail.com>"]
 
-[dependencies.irc]
-version = "*"
-features = ["encode"]
-
 [dependencies]
-regex = "*"
+cookie = "*"
+hyper = "*"
+irc = "*"
 rustc-serialize = "*"
 time = "*"
-hyper = "*"
