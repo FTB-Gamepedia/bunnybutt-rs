@@ -138,6 +138,7 @@ trait JsonFun<'a> {
     fn get(self, &str) -> Result<&'a Json, WikiError>;
     fn string(self) -> Result<&'a str, WikiError>;
     fn array(self) -> Result<&'a Array, WikiError>;
+    fn integer(self) -> Result<i64, WikiError>;
 }
 impl<'a> JsonFun<'a> for &'a Json {
     fn get(self, s: &str) -> Result<&'a Json, WikiError> {
@@ -148,6 +149,9 @@ impl<'a> JsonFun<'a> for &'a Json {
     }
     fn array(self) -> Result<&'a Array, WikiError> {
         Ok(try!(self.as_array().ok_or(self)))
+    }
+    fn integer(self) -> Result<i64, WikiError> {
+        Ok(try!(self.as_i64().ok_or(self)))
     }
 }
 impl<'a> JsonFun<'a> for Result<&'a Json, WikiError> {
@@ -160,23 +164,27 @@ impl<'a> JsonFun<'a> for Result<&'a Json, WikiError> {
     fn array(self) -> Result<&'a Array, WikiError> {
         self.and_then(|x| x.array())
     }
+    fn integer(self) -> Result<i64, WikiError> {
+        self.and_then(|x| x.integer())
+    }
 }
 struct WikiApi {
-    api: String,
+    baseurl: String,
     cookies: CookieJar<'static>,
     useragent: String,
     rclog: File,
 }
 impl WikiApi {
-    fn make_url(&self, args: &[(&str, &str)]) -> Result<Url, WikiError> {
-        Ok(try!(Url::parse(format!("{}?{}", self.api, serialize(args.iter().map(|&x| x)))[])))
+    fn make_url(&self, s: &str, args: &[(&str, &str)]) -> Result<Url, WikiError> {
+        Ok(try!(Url::parse(format!("{}{}?{}", self.baseurl, s,
+            serialize(args.iter().map(|&x| x)))[])))
     }
     fn make_timestamp(time: Tm) -> Result<String, WikiError> {
         Ok(try!(time.strftime("%Y%m%d%H%M%S")).to_string())
     }
     fn new() -> WikiApi {
         WikiApi {
-            api: "http://ftb.gamepedia.com/api.php".to_owned(),
+            baseurl: "http://ftb.gamepedia.com/".to_owned(),
             cookies: CookieJar::new(&[]),
             useragent: "PonyButt".to_owned(),
             rclog: File::create(&Path::new("rc.txt")).unwrap(),
@@ -208,7 +216,7 @@ impl WikiApi {
         if let Some(token) = token {
             args.push(("lgtoken", token));
         }
-        let url = try!(self.make_url(args[]));
+        let url = try!(self.make_url("api.php", args[]));
         let mut response = try!(self.request(url, Method::Post));
         if response.status != StatusCode::Ok {
             try!(Err(format!("Error while logging in: {}", response.status)));
@@ -230,7 +238,7 @@ impl WikiApi {
     fn get_changes(&mut self, from: Tm, to: Tm) -> Result<Vec<Result<String, WikiError>>, WikiError> {
         let from = try!(WikiApi::make_timestamp(from));
         let to = try!(WikiApi::make_timestamp(to));
-        let url = try!(self.make_url(&[("format", "json"), ("action", "query"),
+        let url = try!(self.make_url("api.php", &[("format", "json"), ("action", "query"),
             ("list", "recentchanges"), ("rclimit", "5000"),
             ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
             ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"), ("rcdir", "newer"),
@@ -247,7 +255,7 @@ impl WikiApi {
             let get_comment = |&:| -> Result<String, WikiError> {
                 let comment = try!(change.get("comment").string());
                 Ok(if comment.is_empty() {
-                    format!("– No edit summary")
+                    format!("– No edit summary -")
                 } else {
                     format!("({})", comment)
                 })
@@ -257,8 +265,21 @@ impl WikiApi {
                     let comment = try!(get_comment());
                     let title = try!(change.get("title").string());
                     let user = try!(change.get("user").string());
-                    Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} – \u{2}{}\u{f} {}", title,
-                        user, comment))
+                    let oldlen = try!(change.get("oldlen").integer());
+                    let newlen = try!(change.get("newlen").integer());
+                    let diff = if newlen > oldlen {
+                        format!("(\u{3}03+{}\u{f})", newlen - oldlen)
+                    } else if newlen < oldlen {
+                        format!("(\u{3}04-{}\u{f})", oldlen - newlen)
+                    } else {
+                        format!("(\u{3}140\u{f})")
+                    };
+                    let old_revid = try!(change.get("old_revid").integer()).to_string();
+                    let revid = try!(change.get("revid").integer()).to_string();
+                    let link = try!(self.make_url("index.php", &[("title", title),
+                        ("diff", revid[]), ("oldid", old_revid[])]));
+                    Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} {} \u{2}{}\u{f} {} {}", title,
+                        diff, user, comment, link))
                 },
                 "new" => {
                     let comment = try!(get_comment());
@@ -329,16 +350,9 @@ impl WikiApi {
                         ("move", "move") => {
                             let title = try!(change.get("title").string());
                             let user = try!(change.get("user").string());
-                            let comment = try!(change.get("comment").string());
-                            let new_title = change.find("move").and_then(|x| x.find("new_title"))
-                                .and_then(|x| x.as_string()).ok_or(change);
-                            let comment = if comment.is_empty() {
-                                format!("– No edit summary")
-                            } else {
-                                format!("({})", comment)
-                            };
+                            let new_title = try!(change.get("move").get("new_title").string());
                             Ok(format!("[\u{2}\u{3}03Move\u{f}] \u{2}{}\u{f} moved \u{2}{}\u{f} to \
-                                \u{2}{}\u{f} {}", user, title, new_title, comment))
+                                \u{2}{}\u{f}", user, title, new_title))
                         },
                         _ => try!(Err(change)),
                     }
