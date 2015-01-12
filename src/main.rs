@@ -1,6 +1,7 @@
 // Copyright © 2014, Peter Atashian
 
-#![feature(phase, slicing_syntax)]
+#![feature(slicing_syntax)]
+#![allow(unstable)]
 
 extern crate cookie;
 extern crate hyper;
@@ -39,8 +40,6 @@ fn main() {
 fn get_time() -> Tm {
     at_utc(now_utc().to_timespec() + Duration::seconds(-2))
 }
-// FIXME - unable to infer enough type information about `_`; type annotations required
-#[allow(unreachable_code)]
 fn run_bot() {
     let config = Config::load(Path::new("irc.json")).unwrap();
     let irc_server = Arc::new(IrcServer::from_config(config).unwrap());
@@ -64,8 +63,7 @@ fn run_bot() {
             read_irc.reconnect().unwrap();
             server.identify().unwrap();
         }
-        () // FIXME - unable to infer enough type information about `_`; type annotations required
-    }).detach();
+    });
     let mut api = WikiApi::new();
     api.login().unwrap();
     let mut last = get_time();
@@ -75,13 +73,13 @@ fn run_bot() {
             Ok(changes) => for change in changes.into_iter() {
                 match change {
                     Ok(change) => {
-                        server.send_privmsg("#FTB-Wiki-recentchanges", change[]).unwrap();
+                        server.send_privmsg("#FTB-Wiki-recentchanges", &change[]).unwrap();
                         sleep(Duration::seconds(2));
                     },
-                    Err(e) => println!("ERROR: {}", e),
+                    Err(e) => println!("ERROR: {:?}", e),
                 }
             },
-            Err(e) => println!("SUPER ERROR: {}", e),
+            Err(e) => println!("SUPER ERROR: {:?}", e),
         }
         last = now;
         sleep(Duration::seconds(15));
@@ -91,32 +89,32 @@ fn run_bot() {
 struct WikiError(String);
 impl FromError<ParserError> for WikiError {
     fn from_error(err: ParserError) -> WikiError {
-        WikiError(err.to_string())
+        WikiError(format!("{:?}", err))
     }
 }
 impl FromError<DecoderError> for WikiError {
     fn from_error(err: DecoderError) -> WikiError {
-        WikiError(err.to_string())
+        WikiError(format!("{:?}", err))
     }
 }
 impl FromError<UrlError> for WikiError {
     fn from_error(err: UrlError) -> WikiError {
-        WikiError(err.to_string())
+        WikiError(format!("{:?}", err))
     }
 }
 impl FromError<TimeError> for WikiError {
     fn from_error(err: TimeError) -> WikiError {
-        WikiError(err.to_string())
+        WikiError(format!("{:?}", err))
     }
 }
 impl FromError<HttpError> for WikiError {
     fn from_error(err: HttpError) -> WikiError {
-        WikiError(err.to_string())
+        WikiError(format!("{:?}", err))
     }
 }
 impl FromError<IoError> for WikiError {
     fn from_error(err: IoError) -> WikiError {
-        WikiError(err.to_string())
+        WikiError(format!("{:?}", err))
     }
 }
 impl<'a> FromError<&'a Json> for WikiError {
@@ -176,7 +174,7 @@ struct WikiApi {
 }
 impl WikiApi {
     fn make_url(&self, s: &str, args: &[(&str, &str)]) -> Result<Url, WikiError> {
-        Ok(try!(Url::parse(format!("{}{}?{}", self.baseurl, s,
+        Ok(try!(Url::parse(&format!("{}{}?{}", self.baseurl, s,
             serialize(args.iter().map(|&x| x)))[])))
     }
     fn make_timestamp(time: Tm) -> Result<String, WikiError> {
@@ -203,7 +201,7 @@ impl WikiApi {
     fn login(&mut self) -> Result<(), WikiError> {
         let mut file = try!(File::open(&Path::new("ftb.json")));
         let text = try!(file.read_to_string());
-        let config = try!(Json::from_str(text[]));
+        let config = try!(Json::from_str(&text[]));
         let username = try!(config.get("username").string());
         let password = try!(config.get("password").string());
         self.do_login(username, password, None)
@@ -216,16 +214,16 @@ impl WikiApi {
         if let Some(token) = token {
             args.push(("lgtoken", token));
         }
-        let url = try!(self.make_url("api.php", args[]));
+        let url = try!(self.make_url("api.php", &args[]));
         let mut response = try!(self.request(url, Method::Post));
         if response.status != StatusCode::Ok {
             try!(Err(format!("Error while logging in: {}", response.status)));
         }
         let text = try!(response.read_to_string());
-        let json: Json = try!(Json::from_str(text[]));
+        let json: Json = try!(Json::from_str(&text[]));
         let inner = try!(json.get("login"));
         let result = try!(inner.get("result").string());
-        match result[] {
+        match &result[] {
             "NeedToken" => self.do_login(username, password,
                 Some(try!(inner.get("token").string()))),
             "Success" => {
@@ -242,13 +240,13 @@ impl WikiApi {
             ("list", "recentchanges"), ("rclimit", "5000"),
             ("rcprop", "user|userid|comment|parsedcomment|timestamp|title|\
             ids|sha1|sizes|redirect|patrolled|loginfo|tags|flags"), ("rcdir", "newer"),
-            ("rcstart", from[]), ("rcend", to[])]));
+            ("rcstart", &from[]), ("rcend", &to[])]));
         let mut response = try!(self.request(url, Method::Get));
         if response.status != StatusCode::Ok {
             try!(Err(format!("Error while getting recent changes: {}", response.status)));
         }
         let text = try!(response.read_to_string());
-        let json: Json = try!(Json::from_str(text[]));
+        let json: Json = try!(Json::from_str(&text[]));
         let changes = try!(json.get("query").get("recentchanges").array());
         Ok(changes.iter().map(|change| {
             try!(write!(&mut self.rclog, "{}", change.pretty()));
@@ -277,7 +275,7 @@ impl WikiApi {
                     let old_revid = try!(change.get("old_revid").integer()).to_string();
                     let revid = try!(change.get("revid").integer()).to_string();
                     let link = try!(self.make_url("index.php", &[("title", title),
-                        ("diff", revid[]), ("oldid", old_revid[])]));
+                        ("diff", &revid[]), ("oldid", &old_revid[])]));
                     Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} {} \u{2}{}\u{f} {} {}", title,
                         diff, user, comment, link))
                 },
