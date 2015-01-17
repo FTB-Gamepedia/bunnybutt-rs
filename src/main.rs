@@ -4,6 +4,7 @@
 #![allow(unstable)]
 
 extern crate cookie;
+extern crate googl;
 extern crate hyper;
 extern crate irc;
 extern crate "rustc-serialize" as rustc_serialize;
@@ -17,9 +18,9 @@ use hyper::client::response::Response;
 use hyper::header::common::{Cookies, SetCookie, UserAgent};
 use hyper::method::Method;
 use hyper::status::StatusCode;
-use irc::data::config::Config;
-use irc::server::{IrcServer, Server};
-use irc::server::utils::Wrapper;
+use irc::client::data::config::Config;
+use irc::client::server::{IrcServer, Server};
+use irc::client::server::utils::Wrapper;
 use rustc_serialize::json::{Array, DecoderError, Json, ParserError};
 use std::borrow::ToOwned;
 use std::error::FromError;
@@ -55,7 +56,7 @@ fn run_bot() {
                 match msg {
                     Ok(msg) => write!(&mut file, "{}", msg.into_string()).unwrap(),
                     Err(e) => {
-                        println!("IRC ERROR: {}", e);
+                        println!("IRC: {}", e);
                         break;
                     },
                 }
@@ -76,10 +77,10 @@ fn run_bot() {
                         server.send_privmsg("#FTB-Wiki-recentchanges", &change[]).unwrap();
                         sleep(Duration::seconds(2));
                     },
-                    Err(e) => println!("ERROR: {:?}", e),
+                    Err(e) => println!("RC: {}", e.0),
                 }
             },
-            Err(e) => println!("SUPER ERROR: {:?}", e),
+            Err(e) => println!("WIKI: {}", e.0),
         }
         last = now;
         sleep(Duration::seconds(15));
@@ -171,6 +172,7 @@ struct WikiApi {
     cookies: CookieJar<'static>,
     useragent: String,
     rclog: File,
+    googlekey: String,
 }
 impl WikiApi {
     fn make_url(&self, s: &str, args: &[(&str, &str)]) -> Result<Url, WikiError> {
@@ -181,11 +183,13 @@ impl WikiApi {
         Ok(try!(time.strftime("%Y%m%d%H%M%S")).to_string())
     }
     fn new() -> WikiApi {
+        let mut file = File::open(&Path::new("key.txt")).unwrap();
         WikiApi {
             baseurl: "http://ftb.gamepedia.com/".to_owned(),
             cookies: CookieJar::new(&[]),
             useragent: "PonyButt".to_owned(),
             rclog: File::create(&Path::new("rc.txt")).unwrap(),
+            googlekey: file.read_to_string().unwrap(),
         }
     }
     fn request(&mut self, url: Url, method: Method) -> Result<Response, WikiError> {
@@ -275,9 +279,16 @@ impl WikiApi {
                     let old_revid = try!(change.get("old_revid").integer()).to_string();
                     let revid = try!(change.get("revid").integer()).to_string();
                     let link = try!(self.make_url("index.php", &[("title", title),
-                        ("diff", &revid[]), ("oldid", &old_revid[])]));
+                        ("diff", &revid[]), ("oldid", &old_revid[])])).to_string();
+                    let shortlink;
+                    loop {
+                        match googl::shorten(&*self.googlekey, &*link) {
+                            Ok(link) => {shortlink = link; break},
+                            Err(_) => sleep(Duration::seconds(5)),
+                        }
+                    }
                     Ok(format!("[\u{2}\u{3}03Edit\u{f}] \u{2}{}\u{f} {} \u{2}{}\u{f} {} {}", title,
-                        diff, user, comment, link))
+                        diff, user, comment, shortlink))
                 },
                 "new" => {
                     let comment = try!(get_comment());

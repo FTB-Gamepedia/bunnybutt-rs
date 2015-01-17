@@ -3,11 +3,11 @@ name = "ircbutt"
 version = "0.1.0"
 authors = ["Peter Atashian <retep998@gmail.com>"]
 
-[dependencies.hyper]
-git = "https://github.com/hyperium/hyper"
-
 [dependencies]
 cookie = "*"
+googl = "*"
+hyper = "*"
 irc = "*"
 rustc-serialize = "*"
 time = "*"
+url = "*"
