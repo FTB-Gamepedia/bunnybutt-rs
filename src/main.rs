@@ -15,7 +15,7 @@ use cookie::{CookieJar};
 use hyper::{HttpError, Url};
 use hyper::client::request::Request;
 use hyper::client::response::Response;
-use hyper::header::common::{Cookies, SetCookie, UserAgent};
+use hyper::header::{Cookies, SetCookie, UserAgent};
 use hyper::method::Method;
 use hyper::status::StatusCode;
 use irc::client::data::config::Config;
@@ -351,6 +351,12 @@ impl WikiApi {
                             let user = try!(change.get("user").string());
                             Ok(format!("[\u{2}\u{3}03Translation\u{f}] \u{2}{}\u{f} marked \
                                 \u{2}{}\u{f} for translation", user, title))
+                        },
+                        ("translationreview", "message") => {
+                            let title = try!(change.get("title").string());
+                            let user = try!(change.get("user").string());
+                            Ok(format!("[\u{2}\u{3}03Translation\u{f}] \u{2}{}\u{f} reviewed \
+                                \u{2}{}\u{f}", user, title))
                         },
                         ("newusers", "create") => {
                             let user = try!(change.get("user").string());
