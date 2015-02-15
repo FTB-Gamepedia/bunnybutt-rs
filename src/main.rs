@@ -1,7 +1,6 @@
 // Copyright © 2014, Peter Atashian
 
-#![feature(slicing_syntax)]
-#![allow(unstable)]
+#![feature(core, io, path, slicing_syntax, std_misc)]
 
 extern crate cookie;
 extern crate googl;
@@ -15,7 +14,7 @@ use cookie::{CookieJar};
 use hyper::{HttpError, Url};
 use hyper::client::request::Request;
 use hyper::client::response::Response;
-use hyper::header::{Cookies, SetCookie, UserAgent};
+use hyper::header::{Cookie, SetCookie, UserAgent};
 use hyper::method::Method;
 use hyper::status::StatusCode;
 use irc::client::data::config::Config;
@@ -24,9 +23,9 @@ use irc::client::server::utils::Wrapper;
 use rustc_serialize::json::{Array, DecoderError, Json, ParserError};
 use std::borrow::ToOwned;
 use std::error::FromError;
-use std::io::IoError;
-use std::io::fs::File;
-use std::io::timer::sleep;
+use std::old_io::IoError;
+use std::old_io::fs::File;
+use std::old_io::timer::sleep;
 use std::sync::Arc;
 use std::thread::Thread;
 use std::time::Duration;
@@ -54,7 +53,16 @@ fn run_bot() {
         loop {
             for msg in read_irc.iter() {
                 match msg {
-                    Ok(msg) => write!(&mut file, "{}", msg.into_string()).unwrap(),
+                    Ok(msg) => {
+                        if let Some(nick) = msg.get_source_nickname() {
+                            if msg.command == "PRIVMSG"
+                                && msg.prefix.as_ref().map_or(false, |x| x.contains("kamran"))
+                            {
+                                server.send_privmsg("ChanServ", &format!("kick #FTB-Wiki {} Blocked users are not allowed to speak", nick)).unwrap();
+                            }
+                        }
+                        write!(&mut file, "{}", msg.into_string()).unwrap()
+                    },
                     Err(e) => {
                         println!("IRC: {}", e);
                         break;
@@ -86,7 +94,7 @@ fn run_bot() {
         sleep(Duration::seconds(15));
     }
 }
-#[derive(Show)]
+#[derive(Debug)]
 struct WikiError(String);
 impl FromError<ParserError> for WikiError {
     fn from_error(err: ParserError) -> WikiError {
@@ -195,7 +203,7 @@ impl WikiApi {
     fn request(&mut self, url: Url, method: Method) -> Result<Response, WikiError> {
         let mut request = try!(Request::new(method, url));
         request.headers_mut().set(UserAgent(self.useragent.clone()));
-        request.headers_mut().set(Cookies::from_cookie_jar(&self.cookies));
+        request.headers_mut().set(Cookie::from_cookie_jar(&self.cookies));
         let response = try!(try!(request.start()).send());
         if let Some(cookies) = response.headers.get::<SetCookie>() {
             cookies.apply_to_cookie_jar(&mut self.cookies);
