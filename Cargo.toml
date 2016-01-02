@@ -1,10 +1,13 @@
 [package]
+authors = ["Peter Atashian <retep998@gmail.com>"]
 name = "ircbutt"
 version = "0.1.0"
-authors = ["Peter Atashian <retep998@gmail.com>"]
 
 [dependencies]
 googl = "*"
 irc = "*"
 rustc-serialize = "*"
-mediawiki = { git = "https://github.com/retep998/mediawiki-rs" }
+url = "0.5.2"
+
+[dependencies.mediawiki]
+git = "https://github.com/retep998/mediawiki-rs"

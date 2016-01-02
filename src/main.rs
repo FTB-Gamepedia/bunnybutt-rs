@@ -4,6 +4,7 @@ extern crate googl;
 extern crate irc;
 extern crate mediawiki;
 extern crate rustc_serialize;
+extern crate url;
 
 use irc::client::prelude::*;
 use mediawiki::{Error as MwError, JsonFun, Mediawiki};
@@ -16,6 +17,8 @@ use std::sync::{Arc};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{sleep, spawn};
 use std::time::{Duration};
+use url::{Url};
+use url::form_urlencoded::{serialize};
 
 #[derive(Debug)]
 enum Error {
@@ -44,6 +47,7 @@ enum Change {
         title: String,
         comment: String,
         diff: i64,
+        link: String,
     },
     New {
         user: String,
@@ -103,32 +107,50 @@ impl Display for Change {
                 write!(f, "{} {} {} created {} {}", Type("new"),
                     Diff(*size), User(user), Title(title), Comment(comment))
             },
-            &Change::Edit { ref user, ref title, ref comment, ref diff } => {
-                write!(f, "{} {} {} edited {} {}", Type("new"),
-                    Diff(*diff), User(user), Title(title), Comment(comment))
+            &Change::Edit { ref user, ref title, ref comment, ref diff, ref link } => {
+                write!(f, "{} {} {} edited {} {} {}", Type("edit"),
+                    Diff(*diff), User(user), Title(title), Comment(comment), link)
             },
         }
     }
+}
+fn make_diff_link(title: &str, diff: &str, oldid: &str) -> String {
+    let mut file = File::open("key.txt").unwrap();
+    let mut key = String::new();
+    file.read_to_string(&mut key).unwrap();
+    let args = [("title", title), ("diff", diff), ("oldid", oldid)];
+    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}", serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    let shortlink;
+    loop {
+        match googl::shorten(&key, &url) {
+            Ok(link) => { shortlink = link; break },
+            Err(_) => sleep(Duration::from_secs(5)),
+        }
+    }
+    shortlink
 }
 fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
     let kind = try!(change.get("type").string());
     let user = try!(change.get("user").string()).to_owned();
     let title = try!(change.get("title").string()).to_owned();
     let comment = change.get("comment").string().unwrap_or("").to_owned();
-    let oldlen = change.get("oldlen").integer();
-    let newlen = change.get("newlen").integer();
+    let oldlen = change.get("oldlen").integer().unwrap_or(0);
+    let newlen = change.get("newlen").integer().unwrap_or(0);
+    let revid = change.get("revid").integer().unwrap_or(0);
+    let old_revid = change.get("old_revid").integer().unwrap_or(0);
     match kind {
         "edit" => send.send(Change::Edit {
             user: user,
+            link: make_diff_link(&title, &revid.to_string(), &old_revid.to_string()),
             title: title,
             comment: comment,
-            diff: try!(newlen) - try!(oldlen),
+            diff: newlen - oldlen,
         }).unwrap(),
         "new" => send.send(Change::New {
             user: user,
             title: title,
             comment: comment,
-            size: try!(newlen),
+            size: newlen,
         }).unwrap(),
         _ => return Err(Error::Unknown),
     }
@@ -141,9 +163,9 @@ fn mw_thread(send: Sender<Change>) {
     let config = decode(&s).unwrap();
     let mw = Mediawiki::login(config).unwrap();
     let mut latest = 0;
-    let mut previous = 0;
     let mut rcfile = OpenOptions::new().write(true).append(true).open("rc.txt").unwrap();
     loop {
+        let previous = latest;
         match mw.recent_changes() {
             Ok(rc) => for change in rc {
                 match change {
@@ -151,12 +173,11 @@ fn mw_thread(send: Sender<Change>) {
                         let id = change.get("rcid").integer().unwrap();
                         latest = max(id, latest);
                         if id <= previous || previous == 0 {
-                            previous = latest;
                             break
                         }
                         if let Err(e) = process_change(&send, &change) {
                             if let Error::Unknown = e {
-                                writeln!(&mut rcfile, "{:#?}", change).unwrap();
+                                writeln!(&mut rcfile, "{}", change).unwrap();
                             }
                             println!("{:?}", e);
                             break
