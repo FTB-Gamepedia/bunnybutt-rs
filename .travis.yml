@@ -5,6 +5,7 @@ script:
   - cargo test --verbose
   - cargo doc --verbose
 notifications:
+  email: false
   irc:
     channels:
       - "irc.esper.net#FTB-Wiki-Dev"

@@ -6,6 +6,7 @@ version = "0.1.0"
 [dependencies]
 googl = "*"
 irc = "*"
+lazy_static = "0.1.15"
 rustc-serialize = "*"
 url = "0.5.2"
 

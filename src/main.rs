@@ -1,7 +1,8 @@
-// Copyright © 2014, Peter Atashian
+// Copyright © 2016, Peter Atashian
 
 extern crate googl;
 extern crate irc;
+#[macro_use] extern crate lazy_static;
 extern crate mediawiki;
 extern crate rustc_serialize;
 extern crate url;
@@ -42,6 +43,13 @@ fn main() {
     irc_thread(recv);
 }
 enum Change {
+    New {
+        user: String,
+        title: String,
+        comment: String,
+        size: i64,
+        link: String,
+    },
     Edit {
         user: String,
         title: String,
@@ -49,11 +57,16 @@ enum Change {
         diff: i64,
         link: String,
     },
-    New {
+    Delete {
         user: String,
         title: String,
         comment: String,
-        size: i64,
+    },
+    Upload {
+        user: String,
+        title: String,
+        comment: String,
+        link: String,
     },
 }
 impl Display for Change {
@@ -89,11 +102,11 @@ impl Display for Change {
         struct Diff(i64);
         impl Display for Diff {
             fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
-                if self.0 >= 100 {
+                if self.0 >= 500 {
                     write!(f, "(\x02\x0303+{}\x0f)", self.0)
                 } else if self.0 > 0 {
                     write!(f, "(\x0303+{}\x0f)", self.0)
-                } else if self.0 <= -100 {
+                } else if self.0 <= -500 {
                     write!(f, "(\x02\x0304{}\x0f)", self.0)
                 } else if self.0 < 0 {
                     write!(f, "(\x0304{}\x0f)", self.0)
@@ -103,31 +116,60 @@ impl Display for Change {
             }
         }
         match self {
-            &Change::New { ref user, ref title, ref comment, ref size } => {
-                write!(f, "{} {} {} created {} {}", Type("new"),
-                    Diff(*size), User(user), Title(title), Comment(comment))
+            &Change::New { ref user, ref title, ref comment, ref size, ref link } => {
+                write!(f, "{} {} {} created {} {} {}", Type("new"),
+                    Diff(*size), User(user), Title(title), Comment(comment), link)
             },
             &Change::Edit { ref user, ref title, ref comment, ref diff, ref link } => {
                 write!(f, "{} {} {} edited {} {} {}", Type("edit"),
                     Diff(*diff), User(user), Title(title), Comment(comment), link)
             },
+            &Change::Delete { ref user, ref title, ref comment } => {
+                write!(f, "{} {} deleted {} {}", Type("delete"),
+                    User(user), Title(title), Comment(comment))
+            },
+            &Change::Upload { ref user, ref title, ref comment, ref link } => {
+                write!(f, "{} {} uploaded {} {} {}", Type("upload"),
+                    User(user), Title(title), Comment(comment), link)
+            },
         }
     }
 }
-fn make_diff_link(title: &str, diff: &str, oldid: &str) -> String {
-    let mut file = File::open("key.txt").unwrap();
-    let mut key = String::new();
-    file.read_to_string(&mut key).unwrap();
-    let args = [("title", title), ("diff", diff), ("oldid", oldid)];
-    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}", serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+fn shorten(link: &str) -> String {
+    lazy_static! {
+        static ref KEY: String = {
+            let mut file = File::open("key.txt").unwrap();
+            let mut key = String::new();
+            file.read_to_string(&mut key).unwrap();
+            key
+        };
+    }
     let shortlink;
     loop {
-        match googl::shorten(&key, &url) {
+        match googl::shorten(&KEY, &link) {
             Ok(link) => { shortlink = link; break },
             Err(_) => sleep(Duration::from_secs(5)),
         }
     }
     shortlink
+}
+fn make_article_link(title: &str) -> String {
+    let args = [("title", title)];
+    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}",
+        serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    shorten(&url)
+}
+fn make_revision_link(title: &str, oldid: &str) -> String {
+    let args = [("title", title), ("oldid", oldid)];
+    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}",
+        serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    shorten(&url)
+}
+fn make_diff_link(title: &str, oldid: &str) -> String {
+    let args = [("title", title), ("diff", "prev"), ("oldid", oldid)];
+    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}",
+        serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    shorten(&url)
 }
 fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
     let kind = try!(change.get("type").string());
@@ -137,21 +179,37 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
     let oldlen = change.get("oldlen").integer().unwrap_or(0);
     let newlen = change.get("newlen").integer().unwrap_or(0);
     let revid = change.get("revid").integer().unwrap_or(0);
-    let old_revid = change.get("old_revid").integer().unwrap_or(0);
+    let logaction = change.get("logaction").string();
+    let logtype = change.get("logtype").string();
     match kind {
         "edit" => send.send(Change::Edit {
             user: user,
-            link: make_diff_link(&title, &revid.to_string(), &old_revid.to_string()),
+            link: make_diff_link(&title, &revid.to_string()),
             title: title,
             comment: comment,
             diff: newlen - oldlen,
         }).unwrap(),
         "new" => send.send(Change::New {
             user: user,
+            link: make_revision_link(&title, &revid.to_string()),
             title: title,
             comment: comment,
             size: newlen,
         }).unwrap(),
+        "log" => match (try!(logaction), try!(logtype)) {
+            ("delete", "delete") => send.send(Change::Delete {
+                user: user,
+                title: title,
+                comment: comment,
+            }).unwrap(),
+            ("upload", "upload") => send.send(Change::Upload {
+                user: user,
+                link: make_article_link(&title),
+                title: title,
+                comment: comment,
+            }).unwrap(),
+            _ => return Err(Error::Unknown),
+        },
         _ => return Err(Error::Unknown),
     }
     Ok(())
