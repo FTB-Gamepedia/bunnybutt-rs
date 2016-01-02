@@ -7,7 +7,7 @@ script:
 notifications:
   irc:
     channels:
-      - "irc.fyrechat.net#vana-commits"
+      - "irc.esper.net#FTB-Wiki-Dev"
     template:
       - "%{repository_slug}/%{branch} (%{commit} - %{author}): %{message}"
     skip_join: true
