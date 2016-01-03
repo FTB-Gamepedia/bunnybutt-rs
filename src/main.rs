@@ -6,6 +6,7 @@ extern crate irc;
 extern crate mediawiki;
 extern crate rustc_serialize;
 extern crate url;
+extern crate regex;
 
 use irc::client::prelude::*;
 use mediawiki::{Error as MwError, JsonFun, Mediawiki};
@@ -20,6 +21,7 @@ use std::thread::{sleep, spawn};
 use std::time::{Duration};
 use url::{Url};
 use url::form_urlencoded::{serialize};
+use regex::Regex;
 
 #[derive(Debug)]
 enum Error {
@@ -83,7 +85,11 @@ impl Display for Change {
                 if self.0.is_empty() {
                     write!(f, "")
                 } else {
-                    write!(f, "(\x1d{}\x0f)", self.0)
+                    let rgx = Regex::new(r"\[\[(.+)\|(?P<t>{.+})\]\]");
+                    let rgx1 = Regex::new(r"\[\[(?<t>{.+})\]\]");
+                    let comment = rgx.replace_all(self.0, "$t");
+                    comment = rgx1.replace_all(comment, "$t");
+                    write!(f, "(\x1d{}\x0f)", comment)
                 }
             }
         }
