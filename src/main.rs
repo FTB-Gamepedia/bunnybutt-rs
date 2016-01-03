@@ -85,11 +85,11 @@ impl Display for Change {
                 if self.0.is_empty() {
                     write!(f, "")
                 } else {
-                    let rgx = Regex::new(r"\[\[(.+)\|(?P<t>{.+})\]\]");
-                    let rgx1 = Regex::new(r"\[\[(?<t>{.+})\]\]");
-                    let comment = rgx.replace_all(self.0, "$t");
-                    comment = rgx1.replace_all(comment, "$t");
-                    write!(f, "(\x1d{}\x0f)", comment)
+                    let rgx = Regex::new(r"\[\[(?P<l>[:alpha:]+)\|(?P<t>[:alpha:]+)\]\]").unwrap();
+                    let rgx1 = Regex::new(r"\[\[(?P<t>[:alpha:]+)\]\]").unwrap();
+                    let mut a = rgx.replace_all(self.0, "$t");
+                    a = rgx1.replace_all(&a, "$t");
+                    write!(f, "(\x1d{}\x0f)", a)
                 }
             }
         }
