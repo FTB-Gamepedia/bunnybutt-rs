@@ -68,6 +68,31 @@ enum Change {
         comment: String,
         link: String,
     },
+    MarkTranslation {
+        user: String,
+        title: String,
+    },
+    ReviewTranslation {
+        user: String,
+        title: String,
+    },
+    AddProtection {
+        user: String,
+        title: String,
+        comment: String,
+        detail: String,
+    },
+    RemoveProtection {
+        user: String,
+        title: String,
+        comment: String,
+    },
+    ModifyProtection {
+        user: String,
+        title: String,
+        comment: String,
+        detail: String,
+    },
 }
 impl Display for Change {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
@@ -132,6 +157,26 @@ impl Display for Change {
                 write!(f, "{} {} uploaded {} {} {}", Type("upload"),
                     User(user), Title(title), Comment(comment), link)
             },
+            &Change::MarkTranslation { ref user, ref title } => {
+                write!(f, "{} {} marked {} for translation", Type("mark"),
+                    User(user), Title(title))
+            },
+            &Change::ReviewTranslation { ref user, ref title } => {
+                write!(f, "{} {} reviewed the translation {}", Type("review"),
+                    User(user), Title(title))
+            },
+            &Change::AddProtection { ref user, ref title, ref comment, ref detail } => {
+                write!(f, "{} {} added protection to {} {} {}", Type("protect"),
+                    User(user), Title(title), detail, Comment(comment))
+            },
+            &Change::ModifyProtection { ref user, ref title, ref comment, ref detail } => {
+                write!(f, "{} {} modified the protection for {} {} {}", Type("protect"),
+                    User(user), Title(title), detail, Comment(comment))
+            },
+            &Change::RemoveProtection { ref user, ref title, ref comment } => {
+                write!(f, "{} {} removed the protection on {} {}", Type("protect"),
+                    User(user), Title(title), Comment(comment))
+            },
         }
     }
 }
@@ -172,15 +217,16 @@ fn make_diff_link(title: &str, oldid: &str) -> String {
     shorten(&url)
 }
 fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
-    let kind = try!(change.get("type").string());
-    let user = try!(change.get("user").string()).to_owned();
-    let title = try!(change.get("title").string()).to_owned();
+    let kind = change.get("type").string().unwrap_or("");
+    let user = change.get("user").string().unwrap_or("NO USER").to_owned();
+    let title = change.get("title").string().unwrap_or("NO TITLE").to_owned();
     let comment = change.get("comment").string().unwrap_or("").to_owned();
     let oldlen = change.get("oldlen").integer().unwrap_or(0);
     let newlen = change.get("newlen").integer().unwrap_or(0);
     let revid = change.get("revid").integer().unwrap_or(0);
-    let logaction = change.get("logaction").string();
-    let logtype = change.get("logtype").string();
+    let logaction = change.get("logaction").string().unwrap_or("");
+    let logtype = change.get("logtype").string().unwrap_or("");
+    let detail0 = change.get("0").string().unwrap_or("");
     match kind {
         "edit" => send.send(Change::Edit {
             user: user,
@@ -196,7 +242,7 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
             comment: comment,
             size: newlen,
         }).unwrap(),
-        "log" => match (try!(logaction), try!(logtype)) {
+        "log" => match (logtype, logaction) {
             ("delete", "delete") => send.send(Change::Delete {
                 user: user,
                 title: title,
@@ -207,6 +253,31 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 link: make_article_link(&title),
                 title: title,
                 comment: comment,
+            }).unwrap(),
+            ("pagetranslation", "mark") => send.send(Change::MarkTranslation {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("translationreview", "message") => send.send(Change::ReviewTranslation {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("protect", "protect") => send.send(Change::AddProtection {
+                user: user,
+                title: title,
+                comment: comment,
+                detail: detail0.to_owned(),
+            }).unwrap(),
+            ("protect", "unprotect") => send.send(Change::RemoveProtection {
+                user: user,
+                title: title,
+                comment: comment,
+            }).unwrap(),
+            ("protect", "modidy") => send.send(Change::ModifyProtection {
+                user: user,
+                title: title,
+                comment: comment,
+                detail: detail0.to_owned(),
             }).unwrap(),
             _ => return Err(Error::Unknown),
         },
@@ -234,9 +305,7 @@ fn mw_thread(send: Sender<Change>) {
                             break
                         }
                         if let Err(e) = process_change(&send, &change) {
-                            if let Error::Unknown = e {
-                                writeln!(&mut rcfile, "{}", change).unwrap();
-                            }
+                            writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
                             println!("{:?}", e);
                             break
                         }
@@ -274,7 +343,11 @@ fn irc_thread(recv: Receiver<Change>) -> ! {
     }
 }
 fn irc_listen_thread<T, U>(server: Arc<IrcServer<T, U>>) where T: IrcRead, U: IrcWrite {
-    for msg in server.iter() {
-
+    let mut file = File::create("irc.txt").unwrap();
+    loop {
+        for msg in server.iter() {
+            writeln!(&mut file, "{:?}", msg).unwrap();
+        }
+        println!("Aw dang, loop is over");
     }
 }
