@@ -93,6 +93,9 @@ enum Change {
         comment: String,
         detail: String,
     },
+    CreateUser {
+        user: String,
+    },
 }
 impl Display for Change {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
@@ -176,6 +179,10 @@ impl Display for Change {
             &Change::RemoveProtection { ref user, ref title, ref comment } => {
                 write!(f, "{} {} removed the protection on {} {}", Type("protect"),
                     User(user), Title(title), Comment(comment))
+            },
+            &Change::CreateUser { ref user } => {
+                write!(f, "{} {} created an account", Type("user"),
+                    User(user))
             },
         }
     }
@@ -273,11 +280,14 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 title: title,
                 comment: comment,
             }).unwrap(),
-            ("protect", "modidy") => send.send(Change::ModifyProtection {
+            ("protect", "modify") => send.send(Change::ModifyProtection {
                 user: user,
                 title: title,
                 comment: comment,
                 detail: detail0.to_owned(),
+            }).unwrap(),
+            ("newusers", "create") => send.send(Change::CreateUser {
+                user: user,
             }).unwrap(),
             _ => return Err(Error::Unknown),
         },
@@ -325,10 +335,18 @@ fn mw_thread(send: Sender<Change>) {
         sleep(Duration::from_secs(10))
     }
 }
+fn is_translation(change: &Change) -> bool {
+    if let &Change::New { ref title, .. } = change {
+        title.starts_with("Translations:")
+    } else if let &Change::Edit { ref title, .. } = change {
+        title.starts_with("Translations:")
+    } else { false }
+}
 fn irc_print_changes<T, U>(server: &Arc<IrcServer<T, U>>, recv: &Receiver<Change>) -> Result<(), Error>
     where T: IrcRead, U: IrcWrite {
     try!(server.identify());
     for change in recv {
+        if is_translation(&change) { continue }
         try!(server.send_privmsg("#FTB-Wiki-recentchanges", &change.to_string()));
     }
     Ok(())
