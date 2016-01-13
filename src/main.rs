@@ -68,7 +68,13 @@ enum Change {
         newtitle: String,
         comment: String,
     },
-    Upload {
+    UploadNew {
+        user: String,
+        title: String,
+        comment: String,
+        link: String,
+    },
+    UploadOverwrite {
         user: String,
         title: String,
         comment: String,
@@ -102,6 +108,18 @@ enum Change {
     CreateUser {
         user: String,
     },
+    NewProfileComment {
+        user: String,
+        title: String
+    },
+    ReplyProfileComment {
+        user: String,
+        title: String
+    },
+    EditProfileComment {
+        user: String,
+        title: String
+    }
 }
 impl Display for Change {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
@@ -166,8 +184,12 @@ impl Display for Change {
                 write!(f, "{} {} moved {} to {} {}", Type("move"),
                     User(user), Title(title), Title(newtitle), Comment(comment))
             },
-            &Change::Upload { ref user, ref title, ref comment, ref link } => {
+            &Change::UploadNew { ref user, ref title, ref comment, ref link } => {
                 write!(f, "{} {} uploaded {} {} {}", Type("upload"),
+                    User(user), Title(title), Comment(comment), link)
+            },
+            &Change::UploadOverwrite { ref user, ref title, ref comment, ref link } => {
+                write!(f, "{} {} uploaded a new version of {} {} {}", Type("upload"),
                     User(user), Title(title), Comment(comment), link)
             },
             &Change::MarkTranslation { ref user, ref title } => {
@@ -194,6 +216,18 @@ impl Display for Change {
                 write!(f, "{} {} created an account", Type("user"),
                     User(user))
             },
+            &Change::NewProfileComment { ref user, ref title } => {
+                write!(f, "{} {} created a new comment on {}", Type("profile"),
+                    User(user), Title(title))
+            },
+            &Change::ReplyProfileComment { ref user, ref title } => {
+                write!(f, "{} {} replied to a comment on {}", Type("profile"),
+                    User(user), Title(title))
+            },
+            &Change::EditProfileComment { ref user, ref title } => {
+                write!(f, "{} {} edited a profile comment on {}", Type("profile"),
+                    User(user), Title(title))
+            }
         }
     }
 }
@@ -270,11 +304,17 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
                 comment: comment,
             }).unwrap(),
-            ("upload", "upload") => send.send(Change::Upload {
+            ("upload", "upload") => send.send(Change::UploadNew {
                 user: user,
                 link: make_article_link(&title),
                 title: title,
                 comment: comment,
+            }).unwrap(),
+            ("upload", "overwrite") => send.send(Change::UploadOverwrite {
+                user: user,
+                link: make_article_link(&title),
+                title: title,
+                comment: comment
             }).unwrap(),
             ("pagetranslation", "mark") => send.send(Change::MarkTranslation {
                 user: user,
@@ -303,6 +343,18 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
             }).unwrap(),
             ("newusers", "create") => send.send(Change::CreateUser {
                 user: user,
+            }).unwrap(),
+            ("curseprofile", "comment-created") => send.send(Change::NewProfileComment {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("curseprofile", "comment-replied") => send.send(Change::ReplyProfileComment {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("curseprofile", "comment-edited") => send.send(Change::EditProfileComment {
+                user: user,
+                title: title,
             }).unwrap(),
             _ => return Err(Error::Unknown),
         },
