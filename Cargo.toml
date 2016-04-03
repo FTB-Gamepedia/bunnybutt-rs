@@ -1,6 +1,6 @@
 [package]
 authors = ["Peter Atashian <retep998@gmail.com>"]
-name = "ircbutt"
+name = "bunnybutt"
 version = "0.1.0"
 
 [dependencies]
@@ -11,4 +11,4 @@ rustc-serialize = "*"
 url = "0.5.2"
 
 [dependencies.mediawiki]
-git = "https://github.com/retep998/mediawiki-rs"
+git = "https://github.com/FTB-Gamepedia/mediawiki-rs.git"

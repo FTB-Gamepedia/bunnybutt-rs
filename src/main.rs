@@ -62,6 +62,12 @@ enum Change {
         title: String,
         comment: String,
     },
+    Move {
+        user: String,
+        title: String,
+        newtitle: String,
+        comment: String,
+    },
     Upload {
         user: String,
         title: String,
@@ -156,6 +162,10 @@ impl Display for Change {
                 write!(f, "{} {} deleted {} {}", Type("delete"),
                     User(user), Title(title), Comment(comment))
             },
+            &Change::Move { ref user, ref title, ref newtitle, ref comment } => {
+                write!(f, "{} {} moved {} to {} {}", Type("move"),
+                    User(user), Title(title), Title(newtitle), Comment(comment))
+            },
             &Change::Upload { ref user, ref title, ref comment, ref link } => {
                 write!(f, "{} {} uploaded {} {} {}", Type("upload"),
                     User(user), Title(title), Comment(comment), link)
@@ -233,7 +243,6 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
     let revid = change.get("revid").integer().unwrap_or(0);
     let logaction = change.get("logaction").string().unwrap_or("");
     let logtype = change.get("logtype").string().unwrap_or("");
-    let detail0 = change.get("0").string().unwrap_or("");
     match kind {
         "edit" => send.send(Change::Edit {
             user: user,
@@ -255,6 +264,12 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 title: title,
                 comment: comment,
             }).unwrap(),
+            ("move", "move") => send.send(Change::Move {
+                user: user,
+                title: title,
+                newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
+                comment: comment,
+            }).unwrap(),
             ("upload", "upload") => send.send(Change::Upload {
                 user: user,
                 link: make_article_link(&title),
@@ -273,7 +288,7 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 user: user,
                 title: title,
                 comment: comment,
-                detail: detail0.to_owned(),
+                detail: change.get("0").string().unwrap_or("").into(),
             }).unwrap(),
             ("protect", "unprotect") => send.send(Change::RemoveProtection {
                 user: user,
@@ -284,7 +299,7 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 user: user,
                 title: title,
                 comment: comment,
-                detail: detail0.to_owned(),
+                detail: change.get("0").string().unwrap_or("").into(),
             }).unwrap(),
             ("newusers", "create") => send.send(Change::CreateUser {
                 user: user,
@@ -317,7 +332,6 @@ fn mw_thread(send: Sender<Change>) {
                         if let Err(e) = process_change(&send, &change) {
                             writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
                             println!("{:?}", e);
-                            break
                         }
                     },
                     Err(e) => {
@@ -366,6 +380,6 @@ fn irc_listen_thread<T, U>(server: Arc<IrcServer<T, U>>) where T: IrcRead, U: Ir
         for msg in server.iter() {
             writeln!(&mut file, "{:?}", msg).unwrap();
         }
-        println!("Aw dang, loop is over");
+        sleep(Duration::from_secs(1))
     }
 }
