@@ -14,12 +14,10 @@ use std::cmp::{max};
 use std::fmt::{Display, Error as FmtError, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Error as IoError, Write};
-use std::sync::{Arc};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{sleep, spawn};
 use std::time::{Duration};
-use url::{Url};
-use url::form_urlencoded::{serialize};
+use url::form_urlencoded::{Serializer};
 
 #[derive(Debug)]
 enum Error {
@@ -250,21 +248,21 @@ fn shorten(link: &str) -> String {
     shortlink
 }
 fn make_article_link(title: &str) -> String {
-    let args = [("title", title)];
-    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}",
-        serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    let args = &[("title", title)];
+    let query = Serializer::new(String::new()).extend_pairs(args).finish();
+    let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
     shorten(&url)
 }
 fn make_revision_link(title: &str, oldid: &str) -> String {
-    let args = [("title", title), ("oldid", oldid)];
-    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}",
-        serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    let args = &[("title", title), ("oldid", oldid)];
+    let query = Serializer::new(String::new()).extend_pairs(args).finish();
+    let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
     shorten(&url)
 }
 fn make_diff_link(title: &str, oldid: &str) -> String {
-    let args = [("title", title), ("diff", "prev"), ("oldid", oldid)];
-    let url = Url::parse(&format!("http://ftb.gamepedia.com/index.php?{}",
-        serialize(args.iter().map(|&x| x)))).unwrap().serialize();
+    let args = &[("title", title), ("diff", "prev"), ("oldid", oldid)];
+    let query = Serializer::new(String::new()).extend_pairs(args).finish();
+    let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
     shorten(&url)
 }
 fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
@@ -372,31 +370,25 @@ fn mw_thread(send: Sender<Change>) {
     let mut rcfile = OpenOptions::new().write(true).append(true).open("rc.txt").unwrap();
     loop {
         let previous = latest;
-        match mw.recent_changes() {
-            Ok(rc) => for change in rc {
-                match change {
-                    Ok(change) => {
-                        let id = change.get("rcid").integer().unwrap();
-                        latest = max(id, latest);
-                        if id <= previous || previous == 0 {
-                            break
-                        }
-                        if let Err(e) = process_change(&send, &change) {
-                            writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
-                            println!("{:?}", e);
-                        }
-                    },
-                    Err(e) => {
-                        println!("{:?}", e);
+        for change in mw.query_recentchanges(10) {
+            match change {
+                Ok(change) => {
+                    let id = change.get("rcid").integer().unwrap();
+                    latest = max(id, latest);
+                    if id <= previous || previous == 0 {
                         break
-                    },
-                }
-                sleep(Duration::from_secs(1))
-            },
-            Err(e) => {
-                println!("{:?}", e);
-                continue;
-            },
+                    }
+                    if let Err(e) = process_change(&send, &change) {
+                        writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
+                        println!("{:?}", e);
+                    }
+                },
+                Err(e) => {
+                    println!("{:?}", e);
+                    break
+                },
+            }
+            sleep(Duration::from_secs(1))
         };
         sleep(Duration::from_secs(10))
     }
@@ -408,8 +400,7 @@ fn is_translation(change: &Change) -> bool {
         title.starts_with("Translations:")
     } else { false }
 }
-fn irc_print_changes<T, U>(server: &Arc<IrcServer<T, U>>, recv: &Receiver<Change>) -> Result<(), Error>
-    where T: IrcRead, U: IrcWrite {
+fn irc_print_changes(server: &IrcServer, recv: &Receiver<Change>) -> Result<(), Error> {
     try!(server.identify());
     for change in recv {
         if is_translation(&change) { continue }
@@ -418,7 +409,7 @@ fn irc_print_changes<T, U>(server: &Arc<IrcServer<T, U>>, recv: &Receiver<Change
     Ok(())
 }
 fn irc_thread(recv: Receiver<Change>) -> ! {
-    let server = Arc::new(IrcServer::new("irc.json").unwrap());
+    let server = IrcServer::new("irc.json").unwrap();
     let server_clone = server.clone();
     spawn(move|| irc_listen_thread(server_clone));
     loop {
@@ -426,7 +417,7 @@ fn irc_thread(recv: Receiver<Change>) -> ! {
         println!("Reconnecting {:?}", server.reconnect());
     }
 }
-fn irc_listen_thread<T, U>(server: Arc<IrcServer<T, U>>) where T: IrcRead, U: IrcWrite {
+fn irc_listen_thread(server: IrcServer) {
     let mut file = File::create("irc.txt").unwrap();
     loop {
         for msg in server.iter() {
