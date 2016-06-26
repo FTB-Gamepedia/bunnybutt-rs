@@ -3,6 +3,9 @@ authors = ["Peter Atashian <retep998@gmail.com>"]
 name = "bunnybutt"
 version = "0.1.0"
 
+[profile.release]
+debug = true
+
 [dependencies]
 googl = "0.0.4"
 irc = "0.11"

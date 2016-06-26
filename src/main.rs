@@ -41,13 +41,6 @@ fn main() {
     irc_thread(recv);
 }
 enum Change {
-    New {
-        user: String,
-        title: String,
-        comment: String,
-        size: i64,
-        link: String,
-    },
     Edit {
         user: String,
         title: String,
@@ -55,37 +48,74 @@ enum Change {
         diff: i64,
         link: String,
     },
+    New {
+        user: String,
+        title: String,
+        comment: String,
+        size: i64,
+        link: String,
+    },
+    // abusefilter
+    AbuseFilterModify {
+        user: String,
+        title: String,
+    },
+    // block
+    Block {
+        user: String,
+        title: String,
+        duration: String,
+        comment: String,
+    },
+    // curseprofile
+    NewProfileComment {
+        user: String,
+        title: String
+    },
+    EditProfileComment {
+        user: String,
+        title: String
+    },
+    ReplyProfileComment {
+        user: String,
+        title: String
+    },
+    // delete
     Delete {
         user: String,
         title: String,
         comment: String,
     },
+    Restore {
+        user: String,
+        title: String,
+        comment: String,
+    },
+    // interwiki
+    // move
     Move {
         user: String,
         title: String,
         newtitle: String,
         comment: String,
     },
-    UploadNew {
+    MoveRedirect {
         user: String,
         title: String,
+        newtitle: String,
         comment: String,
-        link: String,
     },
-    UploadOverwrite {
+    // newusers
+    CreateUser {
         user: String,
-        title: String,
-        comment: String,
-        link: String,
     },
+    // oredict
+    // pagetranslation
     MarkTranslation {
         user: String,
         title: String,
     },
-    ReviewTranslation {
-        user: String,
-        title: String,
-    },
+    // protect
     AddProtection {
         user: String,
         title: String,
@@ -103,21 +133,26 @@ enum Change {
         comment: String,
         detail: String,
     },
-    CreateUser {
+    // rights
+    // tilesheet
+    // translationreview
+    ReviewTranslation {
         user: String,
+        title: String,
     },
-    NewProfileComment {
+    // upload
+    UploadOverwrite {
         user: String,
-        title: String
+        title: String,
+        comment: String,
+        link: String,
     },
-    ReplyProfileComment {
+    UploadNew {
         user: String,
-        title: String
+        title: String,
+        comment: String,
+        link: String,
     },
-    EditProfileComment {
-        user: String,
-        title: String
-    }
 }
 impl Display for Change {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
@@ -166,66 +201,96 @@ impl Display for Change {
             }
         }
         match self {
-            &Change::New { ref user, ref title, ref comment, ref size, ref link } => {
-                write!(f, "{} {} {} created {} {} {}", Type("new"),
-                    Diff(*size), User(user), Title(title), Comment(comment), link)
-            },
             &Change::Edit { ref user, ref title, ref comment, ref diff, ref link } => {
                 write!(f, "{} {} {} edited {} {} {}", Type("edit"),
                     Diff(*diff), User(user), Title(title), Comment(comment), link)
             },
+            &Change::New { ref user, ref title, ref comment, ref size, ref link } => {
+                write!(f, "{} {} {} created {} {} {}", Type("new"),
+                    Diff(*size), User(user), Title(title), Comment(comment), link)
+            },
+            // abusefilter
+            &Change::AbuseFilterModify { ref user, ref title } => {
+                write!(f, "{} {} modified the abuse filter {}", Type("abusefilter"),
+                    User(user), Title(title))
+            },
+            // block
+            &Change::Block { ref user, ref title, ref duration, ref comment } => {
+                write!(f, "{} {} blocked {} for {} {}", Type("block"),
+                    User(user), Title(title), duration, Comment(comment))
+            },
+            // curseprofile
+            &Change::NewProfileComment { ref user, ref title } => {
+                write!(f, "{} {} created a new comment on {}", Type("curseprofile"),
+                    User(user), Title(title))
+            },
+            &Change::EditProfileComment { ref user, ref title } => {
+                write!(f, "{} {} edited a profile comment on {}", Type("curseprofile"),
+                    User(user), Title(title))
+            },
+            &Change::ReplyProfileComment { ref user, ref title } => {
+                write!(f, "{} {} replied to a comment on {}", Type("curseprofile"),
+                    User(user), Title(title))
+            },
+            // delete
             &Change::Delete { ref user, ref title, ref comment } => {
                 write!(f, "{} {} deleted {} {}", Type("delete"),
                     User(user), Title(title), Comment(comment))
             },
+            &Change::Restore { ref user, ref title, ref comment } => {
+                write!(f, "{} {} restored {} {}", Type("delete"),
+                    User(user), Title(title), Comment(comment))
+            },
+            // interwiki
+            // move
             &Change::Move { ref user, ref title, ref newtitle, ref comment } => {
                 write!(f, "{} {} moved {} to {} {}", Type("move"),
                     User(user), Title(title), Title(newtitle), Comment(comment))
             },
-            &Change::UploadNew { ref user, ref title, ref comment, ref link } => {
-                write!(f, "{} {} uploaded {} {} {}", Type("upload"),
-                    User(user), Title(title), Comment(comment), link)
+            &Change::MoveRedirect { ref user, ref title, ref newtitle, ref comment } => {
+                write!(f, "{} {} moved {} to {} overwriting a redirect {}", Type("move"),
+                    User(user), Title(title), Title(newtitle), Comment(comment))
             },
-            &Change::UploadOverwrite { ref user, ref title, ref comment, ref link } => {
-                write!(f, "{} {} uploaded a new version of {} {} {}", Type("upload"),
-                    User(user), Title(title), Comment(comment), link)
+            // newusers
+            &Change::CreateUser { ref user } => {
+                write!(f, "{} {} created an account", Type("user"),
+                    User(user))
             },
+            // oredict
+            // pagetranslation
             &Change::MarkTranslation { ref user, ref title } => {
                 write!(f, "{} {} marked {} for translation", Type("mark"),
                     User(user), Title(title))
             },
-            &Change::ReviewTranslation { ref user, ref title } => {
-                write!(f, "{} {} reviewed the translation {}", Type("review"),
-                    User(user), Title(title))
+            // protect
+            &Change::ModifyProtection { ref user, ref title, ref comment, ref detail } => {
+                write!(f, "{} {} modified the protection for {} {} {}", Type("protect"),
+                    User(user), Title(title), detail, Comment(comment))
             },
             &Change::AddProtection { ref user, ref title, ref comment, ref detail } => {
                 write!(f, "{} {} added protection to {} {} {}", Type("protect"),
-                    User(user), Title(title), detail, Comment(comment))
-            },
-            &Change::ModifyProtection { ref user, ref title, ref comment, ref detail } => {
-                write!(f, "{} {} modified the protection for {} {} {}", Type("protect"),
                     User(user), Title(title), detail, Comment(comment))
             },
             &Change::RemoveProtection { ref user, ref title, ref comment } => {
                 write!(f, "{} {} removed the protection on {} {}", Type("protect"),
                     User(user), Title(title), Comment(comment))
             },
-            &Change::CreateUser { ref user } => {
-                write!(f, "{} {} created an account", Type("user"),
-                    User(user))
-            },
-            &Change::NewProfileComment { ref user, ref title } => {
-                write!(f, "{} {} created a new comment on {}", Type("profile"),
+            // rights
+            // tilesheet
+            // translationreview
+            &Change::ReviewTranslation { ref user, ref title } => {
+                write!(f, "{} {} reviewed the translation {}", Type("review"),
                     User(user), Title(title))
             },
-            &Change::ReplyProfileComment { ref user, ref title } => {
-                write!(f, "{} {} replied to a comment on {}", Type("profile"),
-                    User(user), Title(title))
+            // upload
+            &Change::UploadOverwrite { ref user, ref title, ref comment, ref link } => {
+                write!(f, "{} {} uploaded a new version of {} {} {}", Type("upload"),
+                    User(user), Title(title), Comment(comment), link)
             },
-            &Change::EditProfileComment { ref user, ref title } => {
-                write!(f, "{} {} edited a profile comment on {}", Type("profile"),
-                    User(user), Title(title))
-            }
+            &Change::UploadNew { ref user, ref title, ref comment, ref link } => {
+                write!(f, "{} {} uploaded {} {} {}", Type("upload"),
+                    User(user), Title(title), Comment(comment), link)
+            },
         }
     }
 }
@@ -291,7 +356,34 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
             size: newlen,
         }).unwrap(),
         "log" => match (logtype, logaction) {
+            ("abusefilter", "modify") => send.send(Change::AbuseFilterModify {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("block", "block") => send.send(Change::Block {
+                user: user,
+                title: title,
+                duration: change.get("logparams").get("duration").string().unwrap_or("").into(),
+                comment: comment,
+            }).unwrap(),
+            ("curseprofile", "comment-created") => send.send(Change::NewProfileComment {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("curseprofile", "comment-edited") => send.send(Change::EditProfileComment {
+                user: user,
+                title: title,
+            }).unwrap(),
+            ("curseprofile", "comment-replied") => send.send(Change::ReplyProfileComment {
+                user: user,
+                title: title,
+            }).unwrap(),
             ("delete", "delete") => send.send(Change::Delete {
+                user: user,
+                title: title,
+                comment: comment,
+            }).unwrap(),
+            ("delete", "restore") => send.send(Change::Restore {
                 user: user,
                 title: title,
                 comment: comment,
@@ -302,25 +394,24 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
                 comment: comment,
             }).unwrap(),
-            ("upload", "upload") => send.send(Change::UploadNew {
+            ("move", "move_redir") => send.send(Change::MoveRedirect {
                 user: user,
-                link: make_article_link(&title),
                 title: title,
+                newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
                 comment: comment,
             }).unwrap(),
-            ("upload", "overwrite") => send.send(Change::UploadOverwrite {
+            ("newusers", "create") => send.send(Change::CreateUser {
                 user: user,
-                link: make_article_link(&title),
-                title: title,
-                comment: comment
             }).unwrap(),
             ("pagetranslation", "mark") => send.send(Change::MarkTranslation {
                 user: user,
                 title: title,
             }).unwrap(),
-            ("translationreview", "message") => send.send(Change::ReviewTranslation {
+            ("protect", "modify") => send.send(Change::ModifyProtection {
                 user: user,
                 title: title,
+                comment: comment,
+                detail: change.get("0").string().unwrap_or("").into(),
             }).unwrap(),
             ("protect", "protect") => send.send(Change::AddProtection {
                 user: user,
@@ -333,26 +424,21 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 title: title,
                 comment: comment,
             }).unwrap(),
-            ("protect", "modify") => send.send(Change::ModifyProtection {
+            ("translationreview", "message") => send.send(Change::ReviewTranslation {
                 user: user,
+                title: title,
+            }).unwrap(),
+            ("upload", "overwrite") => send.send(Change::UploadOverwrite {
+                user: user,
+                link: make_article_link(&title),
+                title: title,
+                comment: comment
+            }).unwrap(),
+            ("upload", "upload") => send.send(Change::UploadNew {
+                user: user,
+                link: make_article_link(&title),
                 title: title,
                 comment: comment,
-                detail: change.get("0").string().unwrap_or("").into(),
-            }).unwrap(),
-            ("newusers", "create") => send.send(Change::CreateUser {
-                user: user,
-            }).unwrap(),
-            ("curseprofile", "comment-created") => send.send(Change::NewProfileComment {
-                user: user,
-                title: title,
-            }).unwrap(),
-            ("curseprofile", "comment-replied") => send.send(Change::ReplyProfileComment {
-                user: user,
-                title: title,
-            }).unwrap(),
-            ("curseprofile", "comment-edited") => send.send(Change::EditProfileComment {
-                user: user,
-                title: title,
             }).unwrap(),
             _ => return Err(Error::Unknown),
         },
