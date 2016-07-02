@@ -98,7 +98,27 @@ enum Change {
         title: String,
         comment: String,
     },
-    // interwiki
+    EditInterwiki {
+        user: String,
+        comment: String,
+        prefix: String,
+        url: String,
+        transclude: String,
+        local: String,
+    },
+    DeleteInterwiki {
+        user: String,
+        prefix: String,
+        comment: String,
+    },
+    NewInterwiki {
+        user: String,
+        comment: String,
+        prefix: String,
+        url: String,
+        transclude: String,
+        local: String,
+    },
     // move
     Move {
         user: String,
@@ -256,6 +276,19 @@ impl Display for Change {
                     User(user), Title(title), Comment(comment))
             },
             // interwiki
+            &Change::EditInterwiki { ref user, ref comment, ref prefix, ref url, ref transclude, ref local } => {
+                write!(f, "{} {} edited prefix {} ({}) (transclude: {}; local: {}) ({})", Type("interwiki"),
+                    User(user), prefix, url, transclude, local, Comment(comment))
+            },
+            &Change::DeleteInterwiki { ref user, ref comment, ref prefix } => {
+                write!(f, "{} {} deleted prefix {} ({})", Type("interwiki"),
+                    User(user), prefix, Comment(comment))
+            },
+            &Change::NewInterwiki { ref user, ref comment, ref prefix, ref url, ref transclude, ref local } => {
+                write!(f, "{} {} created new prefix {} ({}) (transclude: {}; local: {}) ({})", 
+                    Type("interwiki"), User(user), prefix, url, transclude, local, Comment(comment)
+                )
+            },
             // move
             &Change::Move { ref user, ref title, ref newtitle, ref comment } => {
                 write!(f, "{} {} moved {} to {} {}", Type("move"),
@@ -464,6 +497,27 @@ fn process_change(change: &Json) -> Result<Change, Error> {
                 link: make_article_link(&title),
                 title: title,
                 comment: comment,
+            },
+            ("interwiki", "iw_edit") => Change::EditInterwiki {
+                user: user,
+                comment: comment,
+                prefix: change.get("params").get("0").string().unwrap_or("").into(),
+                url: change.get("params").get("1").string().unwrap_or("").into(),
+                transclude: change.get("params").get("2").string().unwrap_or("0").into(),
+                local: change.get("params").get("3").string().unwrap_or("0").into(),
+            },
+            ("interwiki", "iw_delete") => Change::DeleteInterwiki {
+                user: user,
+                comment: comment,
+                prefix: change.get("params").get("0").string().unwrap_or("").into(),
+            },
+            ("interwiki", "iw_add") => Change::NewInterwiki {
+                user: user,
+                comment: comment,
+                prefix: change.get("params").get("0").string().unwrap_or("").into(),
+                url: change.get("params").get("1").string().unwrap_or("").into(),
+                transclude: change.get("params").get("2").string().unwrap_or("0").into(),
+                local: change.get("params").get("3").string().unwrap_or("0").into(),
             },
             _ => return Err(Error::Unknown),
         },
