@@ -135,6 +135,13 @@ enum Change {
     },
     // rights
     // tilesheet
+    TranslateTile {
+        user: String,
+        id: i64,
+        name: String,
+        desc: String,
+        lang: String,
+    },
     // translationreview
     ReviewTranslation {
         user: String,
@@ -277,6 +284,10 @@ impl Display for Change {
             },
             // rights
             // tilesheet
+            &Change::TranslateTile { ref user, ref id, ref name, ref desc, ref lang } => {
+                write!(f, "{} {} translated tile #{} to {} as {} {}", Type("tilesheet"),
+                    User(user), id, Title(lang), Title(name), Comment(desc))
+            },
             // translationreview
             &Change::ReviewTranslation { ref user, ref title } => {
                 write!(f, "{} {} reviewed the translation {}", Type("review"),
@@ -424,6 +435,13 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
                 title: title,
                 comment: comment,
             }).unwrap(),
+            ("tilesheet", "translatetile") => send.send(Change::TranslateTile {
+                user: user,
+                id: change.get("logparams").get("id").integer().unwrap_or(0),
+                name: change.get("logparams").get("name").string().unwrap_or("").into(),
+                desc: change.get("logparams").get("desc").string().unwrap_or("").into(),
+                lang: change.get("logparams").get("lang").string().unwrap_or("").into(),
+            }).unwrap(),
             ("translationreview", "message") => send.send(Change::ReviewTranslation {
                 user: user,
                 title: title,
@@ -474,7 +492,6 @@ fn mw_thread(send: Sender<Change>) {
                     break
                 },
             }
-            sleep(Duration::from_secs(1))
         };
         sleep(Duration::from_secs(10))
     }
@@ -491,6 +508,7 @@ fn irc_print_changes(server: &IrcServer, recv: &Receiver<Change>) -> Result<(), 
     for change in recv {
         if is_translation(&change) { continue }
         try!(server.send_privmsg("#FTB-Wiki-recentchanges", &change.to_string()));
+        sleep(Duration::from_secs(1))
     }
     Ok(())
 }
