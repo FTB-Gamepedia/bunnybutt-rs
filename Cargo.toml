@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [profile.release]
 debug = true
+panic = "abort"
 
 [dependencies]
 googl = "0.0.4"

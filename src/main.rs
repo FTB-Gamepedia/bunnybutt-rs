@@ -14,6 +14,7 @@ use std::cmp::{max};
 use std::fmt::{Display, Error as FmtError, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Error as IoError, Write};
+use std::num::{ParseIntError};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{sleep, spawn};
 use std::time::{Duration};
@@ -23,6 +24,7 @@ use url::form_urlencoded::{Serializer};
 enum Error {
     Mediawiki(MwError),
     Io(IoError),
+    ParseInt(ParseIntError),
     Unknown,
 }
 impl From<MwError> for Error {
@@ -33,6 +35,11 @@ impl From<MwError> for Error {
 impl From<IoError> for Error {
     fn from(err: IoError) -> Error {
         Error::Io(err)
+    }
+}
+impl From<ParseIntError> for Error {
+    fn from(err: ParseIntError) -> Error {
+        Error::ParseInt(err)
     }
 }
 fn main() {
@@ -341,7 +348,7 @@ fn make_diff_link(title: &str, oldid: &str) -> String {
     let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
     shorten(&url)
 }
-fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
+fn process_change(change: &Json) -> Result<Change, Error> {
     let kind = change.get("type").string().unwrap_or("");
     let user = change.get("user").string().unwrap_or("NO USER").to_owned();
     let title = change.get("title").string().unwrap_or("NO TITLE").to_owned();
@@ -351,127 +358,139 @@ fn process_change(send: &Sender<Change>, change: &Json) -> Result<(), Error> {
     let revid = change.get("revid").integer().unwrap_or(0);
     let logaction = change.get("logaction").string().unwrap_or("");
     let logtype = change.get("logtype").string().unwrap_or("");
-    match kind {
-        "edit" => send.send(Change::Edit {
+    Ok(match kind {
+        "edit" => Change::Edit {
             user: user,
             link: make_diff_link(&title, &revid.to_string()),
             title: title,
             comment: comment,
             diff: newlen - oldlen,
-        }).unwrap(),
-        "new" => send.send(Change::New {
+        },
+        "new" => Change::New {
             user: user,
             link: make_revision_link(&title, &revid.to_string()),
             title: title,
             comment: comment,
             size: newlen,
-        }).unwrap(),
+        },
         "log" => match (logtype, logaction) {
-            ("abusefilter", "modify") => send.send(Change::AbuseFilterModify {
+            ("abusefilter", "modify") => Change::AbuseFilterModify {
                 user: user,
                 title: title,
-            }).unwrap(),
-            ("block", "block") => send.send(Change::Block {
+            },
+            ("block", "block") => Change::Block {
                 user: user,
                 title: title,
                 duration: change.get("logparams").get("duration").string().unwrap_or("").into(),
                 comment: comment,
-            }).unwrap(),
-            ("curseprofile", "comment-created") => send.send(Change::NewProfileComment {
+            },
+            ("curseprofile", "comment-created") => Change::NewProfileComment {
                 user: user,
                 title: title,
-            }).unwrap(),
-            ("curseprofile", "comment-edited") => send.send(Change::EditProfileComment {
+            },
+            ("curseprofile", "comment-edited") => Change::EditProfileComment {
                 user: user,
                 title: title,
-            }).unwrap(),
-            ("curseprofile", "comment-replied") => send.send(Change::ReplyProfileComment {
+            },
+            ("curseprofile", "comment-replied") => Change::ReplyProfileComment {
                 user: user,
                 title: title,
-            }).unwrap(),
-            ("delete", "delete") => send.send(Change::Delete {
-                user: user,
-                title: title,
-                comment: comment,
-            }).unwrap(),
-            ("delete", "restore") => send.send(Change::Restore {
+            },
+            ("delete", "delete") => Change::Delete {
                 user: user,
                 title: title,
                 comment: comment,
-            }).unwrap(),
-            ("move", "move") => send.send(Change::Move {
+            },
+            ("delete", "restore") => Change::Restore {
+                user: user,
+                title: title,
+                comment: comment,
+            },
+            ("move", "move") => Change::Move {
                 user: user,
                 title: title,
                 newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
                 comment: comment,
-            }).unwrap(),
-            ("move", "move_redir") => send.send(Change::MoveRedirect {
+            },
+            ("move", "move_redir") => Change::MoveRedirect {
                 user: user,
                 title: title,
                 newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
                 comment: comment,
-            }).unwrap(),
-            ("newusers", "create") => send.send(Change::CreateUser {
+            },
+            ("newusers", "create") => Change::CreateUser {
                 user: user,
-            }).unwrap(),
-            ("pagetranslation", "mark") => send.send(Change::MarkTranslation {
-                user: user,
-                title: title,
-            }).unwrap(),
-            ("protect", "modify") => send.send(Change::ModifyProtection {
+            },
+            ("pagetranslation", "mark") => Change::MarkTranslation {
                 user: user,
                 title: title,
-                comment: comment,
-                detail: change.get("0").string().unwrap_or("").into(),
-            }).unwrap(),
-            ("protect", "protect") => send.send(Change::AddProtection {
+            },
+            ("protect", "modify") => Change::ModifyProtection {
                 user: user,
                 title: title,
                 comment: comment,
                 detail: change.get("0").string().unwrap_or("").into(),
-            }).unwrap(),
-            ("protect", "unprotect") => send.send(Change::RemoveProtection {
+            },
+            ("protect", "protect") => Change::AddProtection {
                 user: user,
                 title: title,
                 comment: comment,
-            }).unwrap(),
-            ("tilesheet", "translatetile") => send.send(Change::TranslateTile {
+                detail: change.get("0").string().unwrap_or("").into(),
+            },
+            ("protect", "unprotect") => Change::RemoveProtection {
+                user: user,
+                title: title,
+                comment: comment,
+            },
+            ("tilesheet", "translatetile") => Change::TranslateTile {
                 user: user,
                 id: change.get("logparams").get("id").integer().unwrap_or(0),
                 name: change.get("logparams").get("name").string().unwrap_or("").into(),
                 desc: change.get("logparams").get("desc").string().unwrap_or("").into(),
                 lang: change.get("logparams").get("lang").string().unwrap_or("").into(),
-            }).unwrap(),
-            ("translationreview", "message") => send.send(Change::ReviewTranslation {
+            },
+            ("translationreview", "message") => Change::ReviewTranslation {
                 user: user,
                 title: title,
-            }).unwrap(),
-            ("upload", "overwrite") => send.send(Change::UploadOverwrite {
+            },
+            ("upload", "overwrite") => Change::UploadOverwrite {
                 user: user,
                 link: make_article_link(&title),
                 title: title,
                 comment: comment
-            }).unwrap(),
-            ("upload", "upload") => send.send(Change::UploadNew {
+            },
+            ("upload", "upload") => Change::UploadNew {
                 user: user,
                 link: make_article_link(&title),
                 title: title,
                 comment: comment,
-            }).unwrap(),
+            },
             _ => return Err(Error::Unknown),
         },
         _ => return Err(Error::Unknown),
-    }
-    Ok(())
+    })
 }
 fn mw_thread(send: Sender<Change>) {
+    fn load_latest() -> Result<i64, Error> {
+        let mut file = try!(File::open("latest.txt"));
+        let mut s = String::new();
+        try!(file.read_to_string(&mut s));
+        Ok(try!(s.parse()))
+    }
+    fn save_latest(n: i64) -> Result<(), Error> {
+        let mut file = try!(File::create("latest.txt"));
+        try!(write!(&mut file, "{}", n));
+        Ok(())
+    }
     let mut file = File::open("ftb.json").unwrap();
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
     let config = decode(&s).unwrap();
     let mw = Mediawiki::login(config).unwrap();
-    let mut latest = 0;
+    let mut latest = load_latest().unwrap_or(0);
+    println!("Resuming at {}", latest);
     let mut rcfile = OpenOptions::new().write(true).append(true).open("rc.txt").unwrap();
+    let mut changes = Vec::new();
     loop {
         let previous = latest;
         for change in mw.query_recentchanges(10) {
@@ -482,9 +501,14 @@ fn mw_thread(send: Sender<Change>) {
                     if id <= previous || previous == 0 {
                         break
                     }
-                    if let Err(e) = process_change(&send, &change) {
-                        writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
-                        println!("{:?}", e);
+                    writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
+                    match process_change(&change) {
+                        Ok(change) => changes.push(change),
+                        Err(Error::Unknown) => {
+                            println!("{:?}", (change.get("type"), change.get("logaction"),
+                                change.get("logtype")));
+                        },
+                        Err(e) => println!("{:?}", e),
                     }
                 },
                 Err(e) => {
@@ -493,6 +517,10 @@ fn mw_thread(send: Sender<Change>) {
                 },
             }
         };
+        save_latest(latest).unwrap();
+        for change in changes.drain(..).rev() {
+            send.send(change).unwrap();
+        }
         sleep(Duration::from_secs(10))
     }
 }
@@ -505,10 +533,11 @@ fn is_translation(change: &Change) -> bool {
 }
 fn irc_print_changes(server: &IrcServer, recv: &Receiver<Change>) -> Result<(), Error> {
     try!(server.identify());
+    sleep(Duration::from_secs(8));
     for change in recv {
         if is_translation(&change) { continue }
         try!(server.send_privmsg("#FTB-Wiki-recentchanges", &change.to_string()));
-        sleep(Duration::from_secs(1))
+        sleep(Duration::from_secs(1));
     }
     Ok(())
 }
