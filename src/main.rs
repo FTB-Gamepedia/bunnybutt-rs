@@ -543,11 +543,11 @@ fn mw_thread(send: Sender<Change>) {
     let mw = Mediawiki::login(config).unwrap();
     let mut latest = load_latest().unwrap_or(0);
     println!("Resuming at {}", latest);
-    let mut rcfile = OpenOptions::new().write(true).append(true).open("rc.txt").unwrap();
+    let mut rcfile = OpenOptions::new().write(true).append(true).create(true).open("rc.txt").unwrap();
     let mut changes = Vec::new();
     loop {
         let previous = latest;
-        for change in mw.query_recentchanges(10) {
+        for change in mw.query_recentchanges(20) {
             match change {
                 Ok(change) => {
                     let id = change.get("rcid").integer().unwrap();
