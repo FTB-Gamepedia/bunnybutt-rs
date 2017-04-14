@@ -8,11 +8,11 @@ debug = true
 panic = "abort"
 
 [dependencies]
-googl = "0.0.4"
-irc = "0.11"
+googl = "0.1"
+irc = { default-features = false, version = "0.11" }
 lazy_static = "0.2"
 rustc-serialize = "0.3"
-url = "1.1"
+url = "1.4"
 
 [dependencies.mediawiki]
 git = "https://github.com/FTB-Gamepedia/mediawiki-rs.git"

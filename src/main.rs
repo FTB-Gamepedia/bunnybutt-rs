@@ -12,7 +12,7 @@ use mediawiki::{Error as MwError, JsonFun, Mediawiki};
 use rustc_serialize::json::{Json, decode};
 use std::cmp::{max};
 use std::fmt::{Display, Error as FmtError, Formatter};
-use std::fs::{File, OpenOptions};
+use std::fs::{File, OpenOptions, rename};
 use std::io::{Read, Error as IoError, Write};
 use std::num::{ParseIntError};
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -532,8 +532,10 @@ fn mw_thread(send: Sender<Change>) {
         Ok(try!(s.parse()))
     }
     fn save_latest(n: i64) -> Result<(), Error> {
-        let mut file = try!(File::create("latest.txt"));
+        let mut file = try!(File::create("next.txt"));
         try!(write!(&mut file, "{}", n));
+        drop(file);
+        try!(rename("next.txt", "latest.txt"));
         Ok(())
     }
     let mut file = File::open("ftb.json").unwrap();
