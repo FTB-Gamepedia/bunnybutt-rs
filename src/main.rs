@@ -4,20 +4,23 @@ extern crate googl;
 extern crate irc;
 #[macro_use] extern crate lazy_static;
 extern crate mediawiki;
-extern crate rustc_serialize;
+extern crate serde;
+extern crate serde_json;
 extern crate url;
 
 use irc::client::prelude::*;
-use mediawiki::{Error as MwError, JsonFun, Mediawiki};
-use rustc_serialize::json::{Json, decode};
-use std::cmp::{max};
-use std::fmt::{Display, Error as FmtError, Formatter};
-use std::fs::{File, OpenOptions, rename};
-use std::io::{Read, Error as IoError, Write};
-use std::num::{ParseIntError};
-use std::sync::mpsc::{Receiver, Sender, channel};
-use std::thread::{sleep, spawn};
-use std::time::{Duration};
+use mediawiki::{Error as MwError, Mediawiki};
+use serde_json::Value as Json;
+use std::{
+    cmp::max,
+    fmt::{Display, Error as FmtError, Formatter},
+    fs::{File, OpenOptions, rename},
+    io::{Read, Error as IoError, Write},
+    num::ParseIntError,
+    sync::mpsc::{Receiver, Sender, channel},
+    thread::{sleep, spawn},
+    time::Duration,
+};
 use url::form_urlencoded::{Serializer};
 
 #[derive(Debug)]
@@ -285,7 +288,7 @@ impl Display for Change {
                     User(user), prefix, Comment(comment))
             },
             &Change::NewInterwiki { ref user, ref comment, ref prefix, ref url, ref transclude, ref local } => {
-                write!(f, "{} {} created new prefix {} ({}) (transclude: {}; local: {}) ({})", 
+                write!(f, "{} {} created new prefix {} ({}) (transclude: {}; local: {}) ({})",
                     Type("interwiki"), User(user), prefix, url, transclude, local, Comment(comment)
                 )
             },
@@ -382,15 +385,15 @@ fn make_diff_link(title: &str, oldid: &str) -> String {
     shorten(&url)
 }
 fn process_change(change: &Json) -> Result<Change, Error> {
-    let kind = change.get("type").string().unwrap_or("");
-    let user = change.get("user").string().unwrap_or("NO USER").to_owned();
-    let title = change.get("title").string().unwrap_or("NO TITLE").to_owned();
-    let comment = change.get("comment").string().unwrap_or("").to_owned();
-    let oldlen = change.get("oldlen").integer().unwrap_or(0);
-    let newlen = change.get("newlen").integer().unwrap_or(0);
-    let revid = change.get("revid").integer().unwrap_or(0);
-    let logaction = change.get("logaction").string().unwrap_or("");
-    let logtype = change.get("logtype").string().unwrap_or("");
+    let kind = change["type"].as_str().unwrap_or("");
+    let user = change["user"].as_str().unwrap_or("NO USER").to_owned();
+    let title = change["title"].as_str().unwrap_or("NO TITLE").to_owned();
+    let comment = change["comment"].as_str().unwrap_or("").to_owned();
+    let oldlen = change["oldlen"].as_i64().unwrap_or(0);
+    let newlen = change["newlen"].as_i64().unwrap_or(0);
+    let revid = change["revid"].as_i64().unwrap_or(0);
+    let logaction = change["logaction"].as_str().unwrap_or("");
+    let logtype = change["logtype"].as_str().unwrap_or("");
     Ok(match kind {
         "edit" => Change::Edit {
             user: user,
@@ -414,7 +417,7 @@ fn process_change(change: &Json) -> Result<Change, Error> {
             ("block", "block") => Change::Block {
                 user: user,
                 title: title,
-                duration: change.get("logparams").get("duration").string().unwrap_or("").into(),
+                duration: change["logparams"]["duration"].as_str().unwrap_or("").into(),
                 comment: comment,
             },
             ("curseprofile", "comment-created") => Change::NewProfileComment {
@@ -442,13 +445,13 @@ fn process_change(change: &Json) -> Result<Change, Error> {
             ("move", "move") => Change::Move {
                 user: user,
                 title: title,
-                newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
+                newtitle: change["logparams"]["target_title"].as_str().unwrap_or("").into(),
                 comment: comment,
             },
             ("move", "move_redir") => Change::MoveRedirect {
                 user: user,
                 title: title,
-                newtitle: change.get("logparams").get("target_title").string().unwrap_or("").into(),
+                newtitle: change["logparams"]["target_title"].as_str().unwrap_or("").into(),
                 comment: comment,
             },
             ("newusers", "create") => Change::CreateUser {
@@ -462,13 +465,13 @@ fn process_change(change: &Json) -> Result<Change, Error> {
                 user: user,
                 title: title,
                 comment: comment,
-                detail: change.get("0").string().unwrap_or("").into(),
+                detail: change["0"].as_str().unwrap_or("").into(),
             },
             ("protect", "protect") => Change::AddProtection {
                 user: user,
                 title: title,
                 comment: comment,
-                detail: change.get("0").string().unwrap_or("").into(),
+                detail: change["0"].as_str().unwrap_or("").into(),
             },
             ("protect", "unprotect") => Change::RemoveProtection {
                 user: user,
@@ -477,10 +480,10 @@ fn process_change(change: &Json) -> Result<Change, Error> {
             },
             ("tilesheet", "translatetile") => Change::TranslateTile {
                 user: user,
-                id: change.get("logparams").get("id").integer().unwrap_or(0),
-                name: change.get("logparams").get("name").string().unwrap_or("").into(),
-                desc: change.get("logparams").get("desc").string().unwrap_or("").into(),
-                lang: change.get("logparams").get("lang").string().unwrap_or("").into(),
+                id: change["logparams"]["id"].as_i64().unwrap_or(0),
+                name: change["logparams"]["name"].as_str().unwrap_or("").into(),
+                desc: change["logparams"]["desc"].as_str().unwrap_or("").into(),
+                lang: change["logparams"]["lang"].as_str().unwrap_or("").into(),
             },
             ("translationreview", "message") => Change::ReviewTranslation {
                 user: user,
@@ -501,23 +504,23 @@ fn process_change(change: &Json) -> Result<Change, Error> {
             ("interwiki", "iw_edit") => Change::EditInterwiki {
                 user: user,
                 comment: comment,
-                prefix: change.get("params").get("0").string().unwrap_or("").into(),
-                url: change.get("params").get("1").string().unwrap_or("").into(),
-                transclude: change.get("params").get("2").string().unwrap_or("0").into(),
-                local: change.get("params").get("3").string().unwrap_or("0").into(),
+                prefix: change["params"]["0"].as_str().unwrap_or("").into(),
+                url: change["params"]["1"].as_str().unwrap_or("").into(),
+                transclude: change["params"]["2"].as_str().unwrap_or("0").into(),
+                local: change["params"]["3"].as_str().unwrap_or("0").into(),
             },
             ("interwiki", "iw_delete") => Change::DeleteInterwiki {
                 user: user,
                 comment: comment,
-                prefix: change.get("params").get("0").string().unwrap_or("").into(),
+                prefix: change["params"]["0"].as_str().unwrap_or("").into(),
             },
             ("interwiki", "iw_add") => Change::NewInterwiki {
                 user: user,
                 comment: comment,
-                prefix: change.get("params").get("0").string().unwrap_or("").into(),
-                url: change.get("params").get("1").string().unwrap_or("").into(),
-                transclude: change.get("params").get("2").string().unwrap_or("0").into(),
-                local: change.get("params").get("3").string().unwrap_or("0").into(),
+                prefix: change["params"]["0"].as_str().unwrap_or("").into(),
+                url: change["params"]["1"].as_str().unwrap_or("").into(),
+                transclude: change["params"]["2"].as_str().unwrap_or("0").into(),
+                local: change["params"]["3"].as_str().unwrap_or("0").into(),
             },
             _ => return Err(Error::Unknown),
         },
@@ -538,11 +541,7 @@ fn mw_thread(send: Sender<Change>) {
         try!(rename("next.txt", "latest.txt"));
         Ok(())
     }
-    let mut file = File::open("ftb.json").unwrap();
-    let mut s = String::new();
-    file.read_to_string(&mut s).unwrap();
-    let config = decode(&s).unwrap();
-    let mw = Mediawiki::login(config).unwrap();
+    let mw = Mediawiki::login_path("ftb.json").unwrap();
     let mut latest = load_latest().unwrap_or(0);
     println!("Resuming at {}", latest);
     let mut rcfile = OpenOptions::new().write(true).append(true).create(true).open("rc.txt").unwrap();
@@ -552,12 +551,12 @@ fn mw_thread(send: Sender<Change>) {
         for change in mw.query_recentchanges(20) {
             match change {
                 Ok(change) => {
-                    let id = change.get("rcid").integer().unwrap();
+                    let id = change["rcid"].as_i64().unwrap();
                     latest = max(id, latest);
                     if id <= previous || previous == 0 {
                         break
                     }
-                    writeln!(&mut rcfile, "{}", change.pretty()).unwrap();
+                    writeln!(&mut rcfile, "{:#?}", change).unwrap();
                     match process_change(&change) {
                         Ok(change) => changes.push(change),
                         Err(Error::Unknown) => {
