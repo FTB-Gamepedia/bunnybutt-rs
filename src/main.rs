@@ -1,13 +1,3 @@
-// Copyright © 2016, Peter Atashian
-
-extern crate googl;
-extern crate irc;
-#[macro_use] extern crate lazy_static;
-extern crate mediawiki;
-extern crate serde;
-extern crate serde_json;
-extern crate url;
-
 use irc::client::prelude::*;
 use mediawiki::{Error as MwError, Mediawiki};
 use serde_json::Value as Json;
@@ -240,11 +230,11 @@ impl Display for Change {
         match self {
             &Change::Edit { ref user, ref title, ref comment, ref diff, ref link } => {
                 write!(f, "{} {} {} edited {} {} {}", Type("edit"),
-                    Diff(*diff), User(user), Title(title), Comment(comment), link)
+                    Diff(*diff), User(user), Title(title), link, Comment(comment))
             },
             &Change::New { ref user, ref title, ref comment, ref size, ref link } => {
                 write!(f, "{} {} {} created {} {} {}", Type("new"),
-                    Diff(*size), User(user), Title(title), Comment(comment), link)
+                    Diff(*size), User(user), Title(title), link, Comment(comment))
             },
             // abusefilter
             &Change::AbuseFilterModify { ref user, ref title } => {
@@ -339,50 +329,29 @@ impl Display for Change {
             // upload
             &Change::UploadOverwrite { ref user, ref title, ref comment, ref link } => {
                 write!(f, "{} {} uploaded a new version of {} {} {}", Type("upload"),
-                    User(user), Title(title), Comment(comment), link)
+                    User(user), Title(title), link, Comment(comment))
             },
             &Change::UploadNew { ref user, ref title, ref comment, ref link } => {
                 write!(f, "{} {} uploaded {} {} {}", Type("upload"),
-                    User(user), Title(title), Comment(comment), link)
+                    User(user), Title(title), link, Comment(comment))
             },
         }
     }
-}
-fn shorten(link: &str) -> String {
-    lazy_static! {
-        static ref KEY: String = {
-            let mut file = File::open("key.txt").unwrap();
-            let mut key = String::new();
-            file.read_to_string(&mut key).unwrap();
-            key
-        };
-    }
-    let shortlink;
-    loop {
-        match googl::shorten(&KEY, &link) {
-            Ok(link) => { shortlink = link; break },
-            Err(_) => sleep(Duration::from_secs(5)),
-        }
-    }
-    shortlink
 }
 fn make_article_link(title: &str) -> String {
     let args = &[("title", title)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
-    shorten(&url)
+    format!("https://ftb.gamepedia.com/index.php?{}", query)
 }
-fn make_revision_link(title: &str, oldid: &str) -> String {
-    let args = &[("title", title), ("oldid", oldid)];
+fn make_revision_link(_title: &str, oldid: &str) -> String {
+    let args = &[("oldid", oldid)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
-    shorten(&url)
+    format!("https://ftb.gamepedia.com/index.php?{}", query)
 }
-fn make_diff_link(title: &str, oldid: &str) -> String {
-    let args = &[("title", title), ("diff", "prev"), ("oldid", oldid)];
+fn make_diff_link(_title: &str, diff: &str) -> String {
+    let args = &[("diff", diff)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    let url = &format!("http://ftb.gamepedia.com/index.php?{}", query);
-    shorten(&url)
+    format!("https://ftb.gamepedia.com/index.php?{}", query)
 }
 fn process_change(change: &Json) -> Result<Change, Error> {
     let kind = change["type"].as_str().unwrap_or("");
@@ -395,6 +364,7 @@ fn process_change(change: &Json) -> Result<Change, Error> {
     let logaction = change["logaction"].as_str().unwrap_or("");
     let logtype = change["logtype"].as_str().unwrap_or("");
     Ok(match kind {
+        //categorize
         "edit" => Change::Edit {
             user: user,
             link: make_diff_link(&title, &revid.to_string()),
@@ -432,6 +402,7 @@ fn process_change(change: &Json) -> Result<Change, Error> {
                 user: user,
                 title: title,
             },
+            //curseprofile, profile-edited
             ("delete", "delete") => Change::Delete {
                 user: user,
                 title: title,
@@ -457,10 +428,14 @@ fn process_change(change: &Json) -> Result<Change, Error> {
             ("newusers", "create") => Change::CreateUser {
                 user: user,
             },
+            //pagetranslation, associate
+            //pagetranslation, deletefok
+            //pagetranslation, dissociate
             ("pagetranslation", "mark") => Change::MarkTranslation {
                 user: user,
                 title: title,
             },
+            //pagetranslation, moveok
             ("protect", "modify") => Change::ModifyProtection {
                 user: user,
                 title: title,
@@ -478,6 +453,10 @@ fn process_change(change: &Json) -> Result<Change, Error> {
                 title: title,
                 comment: comment,
             },
+            //rights, rights
+            //tilesheet, createsheet
+            //tilesheet, createtile
+            //tilesheet, edittile
             ("tilesheet", "translatetile") => Change::TranslateTile {
                 user: user,
                 id: change["logparams"]["id"].as_i64().unwrap_or(0),
@@ -529,16 +508,16 @@ fn process_change(change: &Json) -> Result<Change, Error> {
 }
 fn mw_thread(send: Sender<Change>) {
     fn load_latest() -> Result<i64, Error> {
-        let mut file = try!(File::open("latest.txt"));
+        let mut file = File::open("latest.txt")?;
         let mut s = String::new();
-        try!(file.read_to_string(&mut s));
-        Ok(try!(s.parse()))
+        file.read_to_string(&mut s)?;
+        Ok(s.parse()?)
     }
     fn save_latest(n: i64) -> Result<(), Error> {
-        let mut file = try!(File::create("next.txt"));
-        try!(write!(&mut file, "{}", n));
+        let mut file = File::create("next.txt")?;
+        write!(&mut file, "{}", n)?;
         drop(file);
-        try!(rename("next.txt", "latest.txt"));
+        rename("next.txt", "latest.txt")?;
         Ok(())
     }
     let mw = Mediawiki::login_path("ftb.json").unwrap();
@@ -587,11 +566,11 @@ fn is_translation(change: &Change) -> bool {
     } else { false }
 }
 fn irc_print_changes(server: &IrcServer, recv: &Receiver<Change>) -> Result<(), Error> {
-    try!(server.identify());
+    server.identify()?;
     sleep(Duration::from_secs(8));
     for change in recv {
         if is_translation(&change) { continue }
-        try!(server.send_privmsg("#FTB-Wiki-recentchanges", &change.to_string()));
+        server.send_privmsg("#FTB-Wiki-recentchanges", &change.to_string())?;
         sleep(Duration::from_secs(1));
     }
     Ok(())
