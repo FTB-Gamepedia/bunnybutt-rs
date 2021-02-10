@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use serde_json::{json, to_string_pretty, Map as JsonMap, Value as Json};
 use std::{
     cmp::max,
+    fmt::{self, Display, Write as _},
     fs::{read_to_string, rename, File, OpenOptions},
     io::{Error as IoError, Read, Write},
     num::ParseIntError,
@@ -38,9 +39,16 @@ fn main() {
     spawn(move || mw_thread(send));
     webhook_thread(recv);
 }
+struct Title<'a>(&'a str);
+impl<'a> Display for Title<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "**{}**", self.0)
+    }
+}
 struct Change {
     title: String,
     user: String,
+    action: String,
     description: String,
     timestamp: String,
     link: Option<String>,
@@ -54,7 +62,7 @@ impl Change {
         embed.insert("type".into(), Json::String("rich".into()));
         embed.insert("title".into(), Json::String(self.title));
         embed.insert("timestamp".into(), Json::String(self.timestamp));
-        embed.insert("author".into(), json!({"name": self.description}));
+        embed.insert("author".into(), json!({"name": self.action}));
         if let Some(link) = self.link {
             embed.insert("url".into(), Json::String(link));
         }
@@ -70,6 +78,20 @@ impl Change {
         }
         embed.insert("fields".into(), Json::Array(fields));
         json!({"embeds": [Json::Object(embed)], "username": self.user})
+    }
+    fn make_message(self) -> Json {
+        let mut message = String::new();
+        if let Some(diff) = self.diff {
+            write!(&mut message, "[{:+}] ", diff).unwrap();
+        }
+        write!(&mut message, "{}", self.description).unwrap();
+        if let Some(link) = self.link {
+            write!(&mut message, " <{}>", link).unwrap();
+        }
+        if let Some(comment) = self.comment {
+            write!(&mut message, "\n```\n{}\n```", comment).unwrap();
+        }
+        json!({"content": message, "username": self.user})
     }
 }
 fn make_article_link(title: &str) -> String {
@@ -91,6 +113,9 @@ fn process_change(change: &Json) -> Option<Change> {
     let kind = change["type"].as_str()?;
     let user = change["user"].as_str()?.to_owned();
     let title = change["title"].as_str()?.to_owned();
+    if title.starts_with("Translations:") {
+        return None;
+    }
     let timestamp = change["timestamp"].as_str()?.to_owned();
     let comment = change["comment"]
         .as_str()
@@ -101,28 +126,79 @@ fn process_change(change: &Json) -> Option<Change> {
     let revid = change["revid"].as_i64()?;
     let logaction = change["logaction"].as_str();
     let logtype = change["logtype"].as_str();
+    let logparams = &change["logparams"];
     let diff = if oldlen != 0 && newlen != 0 {
         Some(newlen - oldlen)
     } else {
         None
     };
-    let (description, link, extra) = match kind {
+    let ftitle = Title(&title);
+    let (action, description, link, extra) = match kind {
         "categorize" => (
             "Categorize".into(),
-            Some(make_revision_link(&title, &revid.to_string())),
+            format!("Updated {}", ftitle),
+            None,
             Vec::new(),
         ),
         "edit" => (
             "Edit".into(),
+            format!("Edited {}", ftitle),
             Some(make_diff_link(&title, &revid.to_string())),
             Vec::new(),
         ),
         "new" => (
             "New".into(),
+            format!("Created {}", ftitle),
             Some(make_revision_link(&title, &revid.to_string())),
             Vec::new(),
         ),
         "log" => match (logtype?, logaction?) {
+            ("curseprofile", "comment-created") => (
+                "Profile comment".into(),
+                format!("Commented on profile for {}", ftitle),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("curseprofile", "comment-deleted") => (
+                "Profile comment".into(),
+                format!("Deleted comment on profile for {}", ftitle),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("curseprofile", "comment-replied") => (
+                "Profile comment".into(),
+                format!("Replied to comment on profile for {}", ftitle),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("curseprofile", "profile-edited") => (
+                "Profile edit".into(),
+                format!("Edited {} for {}", logparams["4:section"].as_str()?, ftitle),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("delete", "delete") => (
+                "Delete".into(),
+                format!("Deleted {}", ftitle),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("move", "move") => (
+                "Delete".into(),
+                format!(
+                    "Moved {} to {}",
+                    ftitle,
+                    Title(&logparams["target_title"].as_str()?)
+                ),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("upload", "upload") => (
+                "Upload".into(),
+                format!("Uploaded {}", ftitle),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
             _ => return None,
         },
         _ => return None,
@@ -130,6 +206,7 @@ fn process_change(change: &Json) -> Option<Change> {
     Some(Change {
         title,
         user,
+        action,
         description,
         timestamp,
         link,
@@ -206,7 +283,7 @@ fn webhook_thread(recv: Receiver<Change>) -> ! {
     let client = Client::new();
     loop {
         for change in &recv {
-            let embed = change.make_embed();
+            let embed = change.make_message();
             loop {
                 let response = match client
                     .post(webhook)
