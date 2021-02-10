@@ -134,12 +134,12 @@ fn process_change(change: &Json) -> Option<Change> {
     };
     let ftitle = Title(&title);
     let (action, description, link, extra) = match kind {
-        "categorize" => (
-            "Categorize".into(),
-            format!("Updated {}", ftitle),
-            None,
-            Vec::new(),
-        ),
+        // "categorize" => (
+        //     "Categorize".into(),
+        //     format!("Updated {}", ftitle),
+        //     None,
+        //     Vec::new(),
+        // ),
         "edit" => (
             "Edit".into(),
             format!("Edited {}", ftitle),
