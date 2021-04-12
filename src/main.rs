@@ -1,4 +1,5 @@
 use mediawiki::{Error as MwError, Mediawiki};
+use rand::{seq::SliceRandom, thread_rng};
 use reqwest::blocking::Client;
 use serde_json::{json, to_string_pretty, Map as JsonMap, Value as Json};
 use std::{
@@ -97,17 +98,17 @@ impl Change {
 fn make_article_link(title: &str) -> String {
     let args = &[("title", title)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    format!("https://ftb.gamepedia.com/index.php?{}", query)
+    format!("https://ftb.fandom.com/?{}", query)
 }
 fn make_revision_link(_title: &str, oldid: &str) -> String {
     let args = &[("oldid", oldid)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    format!("https://ftb.gamepedia.com/index.php?{}", query)
+    format!("https://ftb.fandom.com/?{}", query)
 }
 fn make_diff_link(_title: &str, diff: &str) -> String {
     let args = &[("diff", diff)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    format!("https://ftb.gamepedia.com/index.php?{}", query)
+    format!("https://ftb.fandom.com/?{}", query)
 }
 fn process_change(change: &Json) -> Option<Change> {
     let kind = change["type"].as_str()?;
@@ -136,7 +137,17 @@ fn process_change(change: &Json) -> Option<Change> {
     let (action, description, link, extra) = match kind {
         "categorize" => (
             "Categorize".into(),
-            format!("Updated {}", ftitle),
+            format!(
+                "Hey <@{}>, {} was updated!",
+                [
+                    "691990855455604786",
+                    "769063453637476403",
+                    "277525077669445632"
+                ]
+                .choose(&mut thread_rng())
+                .unwrap(),
+                ftitle
+            ),
             None,
             Vec::new(),
         ),
@@ -160,13 +171,13 @@ fn process_change(change: &Json) -> Option<Change> {
                 Vec::new(),
             ),
             ("curseprofile", "comment-deleted") => (
-                "Profile comment".into(),
+                "Profile delete comment".into(),
                 format!("Deleted comment on profile for {}", ftitle),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
             ("curseprofile", "comment-replied") => (
-                "Profile comment".into(),
+                "Profile reply comment".into(),
                 format!("Replied to comment on profile for {}", ftitle),
                 Some(make_article_link(&title)),
                 Vec::new(),
@@ -184,7 +195,7 @@ fn process_change(change: &Json) -> Option<Change> {
                 Vec::new(),
             ),
             ("move", "move") => (
-                "Delete".into(),
+                "Move".into(),
                 format!(
                     "Moved {} to {}",
                     ftitle,
