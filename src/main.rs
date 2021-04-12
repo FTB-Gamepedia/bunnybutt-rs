@@ -134,23 +134,6 @@ fn process_change(change: &Json) -> Option<Change> {
         None
     };
     let ftitle = Title(&title);
-    let (action, description, link, extra) = match kind {
-        "categorize" => (
-            "Categorize".into(),
-            format!(
-                "Hey <@{}>, {} was updated!",
-                [
-                    "691990855455604786",
-                    "769063453637476403",
-                    "277525077669445632"
-                ]
-                .choose(&mut thread_rng())
-                .unwrap(),
-                ftitle
-            ),
-            None,
-            Vec::new(),
-        ),
         "edit" => (
             "Edit".into(),
             format!("Edited {}", ftitle),
