@@ -1,5 +1,4 @@
 use mediawiki::{Error as MwError, Mediawiki};
-use rand::{seq::SliceRandom, thread_rng};
 use reqwest::blocking::Client;
 use serde_json::{json, to_string_pretty, Map as JsonMap, Value as Json};
 use std::{
@@ -58,6 +57,7 @@ struct Change {
     extra: Vec<(String, String)>,
 }
 impl Change {
+    #[allow(dead_code)]
     fn make_embed(self) -> Json {
         let mut embed = JsonMap::new();
         embed.insert("type".into(), Json::String("rich".into()));
@@ -110,23 +110,36 @@ fn make_diff_link(_title: &str, diff: &str) -> String {
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
     format!("https://ftb.fandom.com/?{}", query)
 }
-fn process_change(change: &Json) -> Option<Change> {
-    let kind = change["type"].as_str()?;
-    let user = change["user"].as_str()?.to_owned();
-    let title = change["title"].as_str()?.to_owned();
+enum ChangeError {
+    Unhandled,
+    Ignored,
+}
+fn process_change(change: &Json) -> Result<Change, ChangeError> {
+    let kind = change["type"].as_str().ok_or(ChangeError::Unhandled)?;
+    let user = change["user"]
+        .as_str()
+        .ok_or(ChangeError::Unhandled)?
+        .to_owned();
+    let title = change["title"]
+        .as_str()
+        .ok_or(ChangeError::Unhandled)?
+        .to_owned();
     if title.starts_with("Translations:") {
-        return None;
+        return Err(ChangeError::Ignored);
     }
-    let timestamp = change["timestamp"].as_str()?.to_owned();
+    let timestamp = change["timestamp"]
+        .as_str()
+        .ok_or(ChangeError::Unhandled)?
+        .to_owned();
     let comment = change["comment"]
         .as_str()
         .filter(|x| !x.is_empty())
         .map(|x| x.to_owned());
-    let oldlen = change["oldlen"].as_i64()?;
-    let newlen = change["newlen"].as_i64()?;
-    let revid = change["revid"].as_i64()?;
-    let logaction = change["logaction"].as_str();
-    let logtype = change["logtype"].as_str();
+    let oldlen = change["oldlen"].as_i64().ok_or(ChangeError::Unhandled)?;
+    let newlen = change["newlen"].as_i64().ok_or(ChangeError::Unhandled)?;
+    let revid = change["revid"].as_i64().ok_or(ChangeError::Unhandled)?;
+    let logaction = change["logaction"].as_str().ok_or(ChangeError::Unhandled);
+    let logtype = change["logtype"].as_str().ok_or(ChangeError::Unhandled);
     let logparams = &change["logparams"];
     let diff = if oldlen != 0 && newlen != 0 {
         Some(newlen - oldlen)
@@ -135,22 +148,7 @@ fn process_change(change: &Json) -> Option<Change> {
     };
     let ftitle = Title(&title);
     let (action, description, link, extra) = match kind {
-        "categorize" => (
-            "Categorize".into(),
-            format!(
-                "Hey <@{}>, {} was updated!",
-                [
-                    "691990855455604786",
-                    "769063453637476403",
-                    "277525077669445632"
-                ]
-                .choose(&mut thread_rng())
-                .unwrap(),
-                ftitle
-            ),
-            None,
-            Vec::new(),
-        ),
+        "categorize" => return Err(ChangeError::Ignored),
         "edit" => (
             "Edit".into(),
             format!("Edited {}", ftitle),
@@ -184,7 +182,13 @@ fn process_change(change: &Json) -> Option<Change> {
             ),
             ("curseprofile", "profile-edited") => (
                 "Profile edit".into(),
-                format!("Edited {} for {}", logparams["4:section"].as_str()?, ftitle),
+                format!(
+                    "Edited {} for {}",
+                    logparams["4:section"]
+                        .as_str()
+                        .ok_or(ChangeError::Unhandled)?,
+                    ftitle
+                ),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
@@ -199,7 +203,11 @@ fn process_change(change: &Json) -> Option<Change> {
                 format!(
                     "Moved {} to {}",
                     ftitle,
-                    Title(&logparams["target_title"].as_str()?)
+                    Title(
+                        &logparams["target_title"]
+                            .as_str()
+                            .ok_or(ChangeError::Unhandled)?
+                    )
                 ),
                 Some(make_article_link(&title)),
                 Vec::new(),
@@ -210,19 +218,19 @@ fn process_change(change: &Json) -> Option<Change> {
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
-            _ => return None,
+            _ => return Err(ChangeError::Unhandled),
         },
-        _ => return None,
+        _ => return Err(ChangeError::Unhandled),
     };
-    Some(Change {
+    Ok(Change {
         title,
         user,
         action,
         description,
         timestamp,
         link,
-        comment,
         diff,
+        comment,
         extra,
     })
 }
@@ -266,11 +274,14 @@ fn mw_thread(send: Sender<Change>) {
                     if id <= previous || previous == 0 {
                         break;
                     }
-                    let pretty = to_string_pretty(&change).unwrap_or(String::new());
+                    let pretty = to_string_pretty(&change).unwrap_or_default();
                     writeln!(&mut rcfile, "{}", pretty).unwrap();
                     match process_change(&change) {
-                        Some(change) => changes.push(change),
-                        None => writeln!(&mut todofile, "{}", pretty).unwrap(),
+                        Ok(change) => changes.push(change),
+                        Err(ChangeError::Unhandled) => {
+                            writeln!(&mut todofile, "{}", pretty).unwrap()
+                        }
+                        Err(ChangeError::Ignored) => (),
                     }
                 }
                 Err(e) => {

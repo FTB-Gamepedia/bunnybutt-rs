@@ -9,7 +9,6 @@ debug = true
 panic = "abort"
 
 [dependencies]
-rand = "0.8"
 reqwest = { version = "0.10", features = ["blocking", "json"] }
 serde = "1.0"
 serde_json = "1.0"
