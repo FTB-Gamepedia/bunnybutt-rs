@@ -72,7 +72,7 @@ impl Change {
         }
         let mut fields = Vec::new();
         if let Some(diff) = self.diff {
-            fields.push(json!({"name": "Diff", "inline": true, "value": format!("{:+}", diff)}));
+            fields.push(json!({"name": "Diff", "inline": true, "value": format!("{diff:+}")}));
         }
         for (key, value) in self.extra {
             fields.push(json!({"name": key, "inline": true, "value": value}));
@@ -83,14 +83,14 @@ impl Change {
     fn make_message(self) -> Json {
         let mut message = String::new();
         if let Some(diff) = self.diff {
-            write!(&mut message, "[{:+}] ", diff).unwrap();
+            write!(&mut message, "[{diff:+}] ").unwrap();
         }
         write!(&mut message, "{}", self.description).unwrap();
         if let Some(link) = self.link {
-            write!(&mut message, " <{}>", link).unwrap();
+            write!(&mut message, " <{link}>").unwrap();
         }
         if let Some(comment) = self.comment {
-            write!(&mut message, "\n```\n{}\n```", comment).unwrap();
+            write!(&mut message, "\n```\n{comment}\n```").unwrap();
         }
         json!({"content": message, "username": self.user})
     }
@@ -98,17 +98,17 @@ impl Change {
 fn make_article_link(title: &str) -> String {
     let args = &[("title", title)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    format!("https://ftb.fandom.com/?{}", query)
+    format!("https://ftb.fandom.com/?{query}")
 }
 fn make_revision_link(_title: &str, oldid: &str) -> String {
     let args = &[("oldid", oldid)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    format!("https://ftb.fandom.com/?{}", query)
+    format!("https://ftb.fandom.com/?{query}")
 }
 fn make_diff_link(_title: &str, diff: &str) -> String {
     let args = &[("diff", diff)];
     let query = Serializer::new(String::new()).extend_pairs(args).finish();
-    format!("https://ftb.fandom.com/?{}", query)
+    format!("https://ftb.fandom.com/?{query}")
 }
 enum ChangeError {
     Unhandled,
@@ -151,32 +151,32 @@ fn process_change(change: &Json) -> Result<Change, ChangeError> {
         "categorize" => return Err(ChangeError::Ignored),
         "edit" => (
             "Edit".into(),
-            format!("Edited {}", ftitle),
+            format!("Edited {ftitle}"),
             Some(make_diff_link(&title, &revid.to_string())),
             Vec::new(),
         ),
         "new" => (
             "New".into(),
-            format!("Created {}", ftitle),
+            format!("Created {ftitle}"),
             Some(make_revision_link(&title, &revid.to_string())),
             Vec::new(),
         ),
         "log" => match (logtype?, logaction?) {
             ("curseprofile", "comment-created") => (
                 "Profile comment".into(),
-                format!("Commented on profile for {}", ftitle),
+                format!("Commented on profile for {ftitle}"),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
             ("curseprofile", "comment-deleted") => (
                 "Profile delete comment".into(),
-                format!("Deleted comment on profile for {}", ftitle),
+                format!("Deleted comment on profile for {ftitle}"),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
             ("curseprofile", "comment-replied") => (
                 "Profile reply comment".into(),
-                format!("Replied to comment on profile for {}", ftitle),
+                format!("Replied to comment on profile for {ftitle}"),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
@@ -194,7 +194,7 @@ fn process_change(change: &Json) -> Result<Change, ChangeError> {
             ),
             ("delete", "delete") => (
                 "Delete".into(),
-                format!("Deleted {}", ftitle),
+                format!("Deleted {ftitle}"),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
@@ -204,7 +204,7 @@ fn process_change(change: &Json) -> Result<Change, ChangeError> {
                     "Moved {} to {}",
                     ftitle,
                     Title(
-                        &logparams["target_title"]
+                        logparams["target_title"]
                             .as_str()
                             .ok_or(ChangeError::Unhandled)?
                     )
@@ -214,7 +214,31 @@ fn process_change(change: &Json) -> Result<Change, ChangeError> {
             ),
             ("upload", "upload") => (
                 "Upload".into(),
-                format!("Uploaded {}", ftitle),
+                format!("Uploaded {ftitle}"),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("upload", "overwrite") => (
+                "Upload".into(),
+                format!("Uploaded a new version of {ftitle}"),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("pagetranslation", "mark") => (
+                "Page translation".into(),
+                format!("Marked {ftitle} for translation"),
+                Some(make_article_link(&title)),
+                Vec::new(),
+            ),
+            ("protect", "protect") => (
+                "Protection".into(),
+                format!(
+                    "Modified protection for {} to {}",
+                    ftitle,
+                    logparams["description"]
+                        .as_str()
+                        .ok_or(ChangeError::Unhandled)?,
+                ),
                 Some(make_article_link(&title)),
                 Vec::new(),
             ),
@@ -243,14 +267,14 @@ fn mw_thread(send: Sender<Change>) {
     }
     fn save_latest(n: i64) -> Result<(), Error> {
         let mut file = File::create("next.txt")?;
-        write!(&mut file, "{}", n)?;
+        write!(&mut file, "{n}")?;
         drop(file);
         rename("next.txt", "latest.txt")?;
         Ok(())
     }
     let mw = Mediawiki::login_path("ftb.json").unwrap();
     let mut latest = load_latest().unwrap_or(0);
-    println!("Resuming at {}", latest);
+    println!("Resuming at {latest}");
     let mut rcfile = OpenOptions::new()
         .write(true)
         .append(true)
@@ -275,17 +299,15 @@ fn mw_thread(send: Sender<Change>) {
                         break;
                     }
                     let pretty = to_string_pretty(&change).unwrap_or_default();
-                    writeln!(&mut rcfile, "{}", pretty).unwrap();
+                    writeln!(&mut rcfile, "{pretty}").unwrap();
                     match process_change(&change) {
                         Ok(change) => changes.push(change),
-                        Err(ChangeError::Unhandled) => {
-                            writeln!(&mut todofile, "{}", pretty).unwrap()
-                        }
+                        Err(ChangeError::Unhandled) => writeln!(&mut todofile, "{pretty}").unwrap(),
                         Err(ChangeError::Ignored) => (),
                     }
                 }
                 Err(e) => {
-                    println!("Failed to query RC: {:?}", e);
+                    println!("Failed to query RC: {e:?}");
                     break;
                 }
             }
@@ -315,7 +337,7 @@ fn webhook_thread(recv: Receiver<Change>) -> ! {
                 {
                     Ok(response) => response,
                     Err(err) => {
-                        println!("Failed to send: {}", err);
+                        println!("Failed to send: {err}");
                         sleep(Duration::from_secs(10));
                         continue;
                     }
@@ -327,8 +349,8 @@ fn webhook_thread(recv: Receiver<Change>) -> ! {
                 let json: Json = match response.json() {
                     Ok(x) => x,
                     Err(err) => {
-                        println!("{}", status);
-                        println!("{}", err);
+                        println!("{status}");
+                        println!("{err}");
                         sleep(Duration::from_secs(10));
                         continue;
                     }
@@ -336,13 +358,13 @@ fn webhook_thread(recv: Receiver<Change>) -> ! {
                 match status.as_u16() {
                     429 => {
                         let retry_after = json["retry_after"].as_u64().unwrap_or(1000);
-                        println!("Sleeping for {}ms", retry_after);
+                        println!("Sleeping for {retry_after}ms");
                         sleep(Duration::from_millis(retry_after));
                     }
                     _ => {
-                        println!("{}", status);
-                        println!("{}", json);
-                        println!("{}", embed);
+                        println!("{status}");
+                        println!("{json}");
+                        println!("{embed}");
                         sleep(Duration::from_secs(10));
                     }
                 }
